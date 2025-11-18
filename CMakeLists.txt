@@ -1,0 +1,48 @@
+cmake_minimum_required(VERSION 3.18)
+
+project(MyOfflineRenderer LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# --- vcpkg パッケージの検索 ---
+
+find_package(Vulkan REQUIRED)
+
+# 【修正点】名前を "vulkan-memory-allocator" (ハイフン区切り) に変更
+# vcpkgの仕様ではここがケバブケース(kebab-case)になります
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+
+find_package(glm CONFIG REQUIRED)
+find_package(Stb REQUIRED)
+
+# SPIRV-Cross関連
+find_package(spirv_cross_core CONFIG REQUIRED)
+find_package(spirv_cross_glsl CONFIG REQUIRED)
+
+find_package(assimp CONFIG REQUIRED)
+find_package(lodepng CONFIG REQUIRED)
+
+# --- 実行ファイルの作成 ---
+add_executable(RendererApp main.cpp)
+
+if(STB_INCLUDE_DIR)
+    target_include_directories(RendererApp PRIVATE ${STB_INCLUDE_DIR})
+endif()
+
+# --- ライブラリのリンク ---
+target_link_libraries(RendererApp PRIVATE
+    Vulkan::Vulkan
+    
+    # 【重要】ターゲット名(リンク時の名前)は "GPUOpen::VulkanMemoryAllocator" で正解です
+    # find_packageの名前とは異なるので注意が必要です
+    GPUOpen::VulkanMemoryAllocator
+
+    glm::glm
+
+    spirv-cross-core
+    spirv-cross-glsl
+
+    assimp::assimp
+    lodepng
+)

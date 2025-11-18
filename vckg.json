@@ -1,0 +1,14 @@
+{
+  "name": "my-renderer",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "shaderc",
+    "glm",
+    "assimp",
+    "lodepng",
+    "stb",
+    "spirv-cross",
+    "vulkan-memory-allocator",
+    "shaderc"
+  ]
+}
