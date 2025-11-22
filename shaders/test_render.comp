@@ -1,40 +1,46 @@
 #version 450
-
-// 1グループあたりのスレッド数 (16x16 = 256スレッド)
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-// ピクセルごとの色情報 (RGBA)
 struct Pixel {
     float r, g, b, a;
 };
 
-// 出力用バッファ (Binding = 0)
+// Binding 0: 書き込み用画像データ (Storage Buffer)
 layout(std140, binding = 0) buffer PixelBuffer {
     Pixel pixels[];
 } image;
 
+// Binding 1: 読み取り専用シーンデータ (Uniform Buffer) 【追加】
+layout(std140, binding = 1) uniform SceneData {
+    vec4 resolution; // x=width, y=height, z=unused, w=unused
+    vec4 params;     // x=time, y=frame_count, z=unused, w=unused
+    vec4 cameraPos;  // カメラ位置 (まだ使わないけど予約)
+} scene;
+
 void main() {
-    // 現在の画素位置 (x, y)
+    uint width = uint(scene.resolution.x);
+    uint height = uint(scene.resolution.y);
+    
     uint x = gl_GlobalInvocationID.x;
     uint y = gl_GlobalInvocationID.y;
 
-    // 画像サイズ (とりあえずハードコード。後で定数バッファなどで渡すようにします)
-    uint width = 800;
-    uint height = 600;
-
-    // 範囲外なら何もしない
     if (x >= width || y >= height) return;
 
-    // 1次元配列のインデックスを計算
     uint index = y * width + x;
 
-    // UV座標 (0.0 ~ 1.0) の計算
+    // 時間(Time)を使って色を動かす
+    float time = scene.params.x;
+    
     float u = float(x) / float(width);
     float v = float(y) / float(height);
 
-    // 色の計算: 綺麗なグラデーション
-    image.pixels[index].r = u;          // X軸: 赤が増える
-    image.pixels[index].g = v;          // Y軸: 緑が増える
-    image.pixels[index].b = 0.2;        // 青は固定
-    image.pixels[index].a = 1.0;        // アルファは不透明
+    // 時間経過で色が波打つエフェクト
+    float r = 0.5 + 0.5 * sin(time + u * 6.28);
+    float g = v;
+    float b = 0.5 + 0.5 * cos(time + v * 6.28);
+
+    image.pixels[index].r = r;
+    image.pixels[index].g = g;
+    image.pixels[index].b = b;
+    image.pixels[index].a = 1.0;
 }
