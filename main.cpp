@@ -7,7 +7,7 @@
 #include <iostream>
 #include <cmath>
 #include <glm/glm.hpp>
-
+#include "Renderer.hpp"
 struct SceneData {
     glm::vec4 resolution; // width, height, 0, 0
     glm::vec4 params;     // time, frame, 0, 0
