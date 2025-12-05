@@ -46,3 +46,6 @@
 
 # CMakeUserPresets
 CMakeUserPresets.json
+
+# image
+/image/
