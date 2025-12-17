@@ -2,7 +2,7 @@
 #include "GpuBuffer.hpp"
 #include "ComputePipeline.hpp"
 #include "CommandList.hpp"
-#include "ImageExporter.hpp" // 追加
+#include "ImageExporter.hpp"
 #include "DescriptorManager.hpp"
 #include <iostream>
 #include <cmath>
@@ -30,22 +30,22 @@ int main() {
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
             VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
-        // 2. シーン情報用バッファ (UniformBuffer) 【追加】
+        // 2. シーン情報用バッファ (UniformBuffer)
         VkDeviceSize sceneBufferSize = sizeof(SceneData);
         GpuBuffer sceneBuffer(device.getAllocator(), sceneBufferSize,
-            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, // UNIFORMビットが重要
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
         // データの書き込み
         SceneData scene{};
         scene.resolution = glm::vec4(WIDTH, HEIGHT, 0, 0);
-        scene.params = glm::vec4(1.5f, 0, 0, 0); // Time = 1.5秒としてテスト
+        scene.params = glm::vec4(0.0f, 0, 0, 0); // Time = 1.5秒としてテスト
         sceneBuffer.writeData(&scene, sizeof(SceneData));
 
-        // 3. パイプライン作成 (新しい render.spv を読む)
+        // 3. パイプライン作成
         ComputePipeline pipeline(device, "test.spv");
 
-        // 4. ディスクリプタセットの作成（Managerを使って簡潔に！）
+        // 4. ディスクリプタセットの作成
         DescriptorManager descManager(device);
         
         VkDescriptorSet descriptorSet = descManager.createBuilder(pipeline.getDescriptorSetLayout())
@@ -68,7 +68,7 @@ int main() {
         imageBuffer.unmap();
 
     } catch (const std::exception& e) {
-        std::cerr << "Critical Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
         return EXIT_FAILURE;
     }
 

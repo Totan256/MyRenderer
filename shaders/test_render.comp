@@ -14,7 +14,7 @@ layout(std140, binding = 0) buffer PixelBuffer {
 layout(std140, binding = 1) uniform SceneData {
     vec4 resolution; // x=width, y=height, z=unused, w=unused
     vec4 params;     // x=time, y=frame_count, z=unused, w=unused
-    vec4 cameraPos;  // カメラ位置 (まだ使わないけど予約)
+    vec4 cameraPos;  // カメラ位置
 } scene;
 
 void main() {
