@@ -27,6 +27,8 @@ find_package(unofficial-shaderc CONFIG REQUIRED)
 # --- 実行ファイルの作成 ---
 file(GLOB_RECURSE SRC_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rhi/*.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rhi/vulkan/*.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 )
 add_executable(RendererApp
@@ -41,6 +43,8 @@ endif()
 target_include_directories(RendererApp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rhi
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/rhi/vulkan
 )
 
 # --- ライブラリのリンク ---

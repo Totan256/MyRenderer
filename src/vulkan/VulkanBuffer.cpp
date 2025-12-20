@@ -1,8 +1,8 @@
-﻿#include "GpuBuffer.hpp"
+﻿#include "VulkanBuffer.hpp"
 #include <stdexcept>
 #include <iostream>
 
-GpuBuffer::GpuBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
+VulkanBuffer::VulkanBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
     : m_allocator(allocator), m_size(size) {
     
     // 1. バッファ作成情報の定義
@@ -33,14 +33,14 @@ GpuBuffer::GpuBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFla
     }
 }
 
-GpuBuffer::~GpuBuffer() {
+VulkanBuffer::~VulkanBuffer() {
     // メモリとバッファを解放
     if (m_buffer != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
         vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
     }
 }
 
-void GpuBuffer::writeData(const void* data, size_t dataSize) {
+void VulkanBuffer::writeData(const void* data, size_t dataSize) {
     // サイズチェック
     if (dataSize > m_size) {
         throw std::runtime_error("Data size is larger than buffer size!");
@@ -61,13 +61,13 @@ void GpuBuffer::writeData(const void* data, size_t dataSize) {
     vmaUnmapMemory(m_allocator, m_allocation);
 }
 
-void* GpuBuffer::map() {
+void* VulkanBuffer::map() {
     void* data;
     VkResult result = vmaMapMemory(m_allocator, m_allocation, &data);
     if (result != VK_SUCCESS) throw std::runtime_error("Failed to map memory");
     return data;
 }
 
-void GpuBuffer::unmap() {
+void VulkanBuffer::unmap() {
     vmaUnmapMemory(m_allocator, m_allocation);
 }

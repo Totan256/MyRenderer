@@ -1,11 +1,11 @@
 ﻿#pragma once
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
-#include "GraphicsDevice.hpp"
-#include "CommandList.hpp"
-#include "GPUImage.hpp"
+#include "VulkanDevice.hpp"
+#include "VulkanCommandList.hpp"
+#include "VulkanImage.hpp"
 
-GpuImage::GpuImage(GraphicsDevice& device, uint32_t width, uint32_t height)
+VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height)
     : m_device(device), m_width(width), m_height(height) {
     
     VkImageCreateInfo imageInfo{};
@@ -51,7 +51,7 @@ GpuImage::GpuImage(GraphicsDevice& device, uint32_t width, uint32_t height)
     }
 }
 
-GpuImage::~GpuImage(){
+VulkanImage::~VulkanImage(){
     if (m_view != VK_NULL_HANDLE) {
         vkDestroyImageView(m_device.getDevice(), m_view, nullptr);
     }
@@ -60,7 +60,7 @@ GpuImage::~GpuImage(){
     }
 }
 
-void GpuImage::transitionLayout(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout){
+void VulkanImage::transitionLayout(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout){
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
@@ -106,7 +106,7 @@ void GpuImage::transitionLayout(VkCommandBuffer cmd, VkImageLayout oldLayout, Vk
     m_currentLayout = newLayout;   
 }
 
-void GpuImage::copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer) {
+void VulkanImage::copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer) {
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
     region.bufferRowLength = 0;

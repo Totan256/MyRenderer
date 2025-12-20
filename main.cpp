@@ -1,19 +1,17 @@
-﻿#include "GraphicsDevice.hpp"
-#include "GpuBuffer.hpp"
-#include "ComputePipeline.hpp"
-#include "CommandList.hpp"
-#include "ImageExporter.hpp"
-#include "DescriptorManager.hpp"
+﻿
 #include <iostream>
 #include <cmath>
 #include <glm/glm.hpp>
+
+#include "rhi/RHI.hpp"
+
 #include "Renderer.hpp"
-#include "GPUImage.hpp"
+#include "ImageExporter.hpp"
 
 
 int main() {
     try {
-        GraphicsDevice device;
+        rhi::Device device;
         device.initialize();
 
         // レンダラの作成

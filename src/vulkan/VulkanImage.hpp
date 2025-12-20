@@ -1,16 +1,16 @@
 ﻿#pragma once
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
-#include "GraphicsDevice.hpp"
-#include "CommandList.hpp"
+#include "VulkanDevice.hpp"
+#include "VulkanCommandList.hpp"
 
-class GpuImage{
+class VulkanImage{
 public:
-    GpuImage(GraphicsDevice& device, uint32_t width, uint32_t height);
-    ~GpuImage();
+    VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height);
+    ~VulkanImage();
     // コピー禁止
-    GpuImage(const GpuImage&) = delete;
-    GpuImage& operator=(const GpuImage&) = delete;
+    VulkanImage(const VulkanImage&) = delete;
+    VulkanImage& operator=(const VulkanImage&) = delete;
 
     // バリアを張ってレイアウトを変更
     void transitionLayout(VkCommandBuffer cmd, VkImageLayout oldLayout, VkImageLayout newLayout);
@@ -21,7 +21,7 @@ public:
     VkImageView getView() const {return m_view;}
 
 private:
-    GraphicsDevice& m_device;
+    VulkanDevice& m_device;
     VkImage m_image = VK_NULL_HANDLE;
     VkImageView m_view = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE;

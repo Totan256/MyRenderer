@@ -1,12 +1,12 @@
 ﻿#pragma once
-#include "GraphicsDevice.hpp"
+#include "VulkanDevice.hpp"
 #include <vector>
 #include <stdexcept>
 #include <list>
 
 class DescriptorManager {
 public:
-    DescriptorManager(GraphicsDevice& device) : m_device(device) {
+    DescriptorManager(VulkanDevice& device) : m_device(device) {
         // 汎用的なプールを作成（必要に応じて拡張・再確保するロジックを入れるのが一般的だが、今回は簡易版）
         std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
@@ -32,7 +32,7 @@ public:
     // 簡易ビルダー: セットを確保して書き込みを行う
     class Builder {
     public:
-        Builder(GraphicsDevice& dev, VkDescriptorPool pool, VkDescriptorSetLayout layout)
+        Builder(VulkanDevice& dev, VkDescriptorPool pool, VkDescriptorSetLayout layout)
             : m_device(dev), m_pool(pool), m_layout(layout) {}
 
         // バッファをバインドする
@@ -94,7 +94,7 @@ public:
         }
 
     private:
-        GraphicsDevice& m_device;
+        VulkanDevice& m_device;
         VkDescriptorPool m_pool;
         VkDescriptorSetLayout m_layout;
         std::vector<VkWriteDescriptorSet> m_writes;
@@ -109,6 +109,6 @@ public:
     }
 
 private:
-    GraphicsDevice& m_device;
+    VulkanDevice& m_device;
     VkDescriptorPool m_pool;
 };

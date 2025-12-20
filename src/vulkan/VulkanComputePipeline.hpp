@@ -3,13 +3,13 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
-#include "GraphicsDevice.hpp"
+#include "VulkanDevice.hpp"
 
-class ComputePipeline {
+class VulkanComputePipeline {
 public:
     // コンストラクタでパイプライン構築まで行う
-    ComputePipeline(GraphicsDevice& device, const std::string& shaderPath);
-    ~ComputePipeline();
+    VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath);
+    ~VulkanComputePipeline();
 
     // Vulkanハンドル取得
     VkPipeline getPipeline() const { return m_pipeline; }
@@ -17,7 +17,7 @@ public:
     VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
 
 private:
-    GraphicsDevice& m_device; // デバイスへの参照を保持
+    VulkanDevice& m_device; // デバイスへの参照を保持
     
     VkPipeline m_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;

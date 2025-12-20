@@ -1,7 +1,6 @@
-﻿// GraphicsDevice.hpp
+﻿// VulkanDevice.hpp
 #pragma once
 
-// vcpkgで入れたライブラリ
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 
@@ -23,14 +22,14 @@
         } \
     } while (0)
 
-class GraphicsDevice {
+class VulkanDevice {
 public:
-    GraphicsDevice() = default;
-    ~GraphicsDevice();
+    VulkanDevice() = default;
+    ~VulkanDevice();
 
     // コピー禁止
-    GraphicsDevice(const GraphicsDevice&) = delete;
-    GraphicsDevice& operator=(const GraphicsDevice&) = delete;
+    VulkanDevice(const VulkanDevice&) = delete;
+    VulkanDevice& operator=(const VulkanDevice&) = delete;
 
     // 初期化（失敗したら例外を投げる）
     void initialize();

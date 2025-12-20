@@ -1,9 +1,9 @@
-﻿#include "ComputePipeline.hpp"
+﻿#include "VulkanComputePipeline.hpp"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 
-ComputePipeline::ComputePipeline(GraphicsDevice& device, const std::string& shaderPath)
+VulkanComputePipeline::VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath)
     : m_device(device) {
     
     // 1. ディスクリプタセットレイアウトの作成（Binding=0にStorageBufferがあることを定義）
@@ -13,7 +13,7 @@ ComputePipeline::ComputePipeline(GraphicsDevice& device, const std::string& shad
     createPipeline(shaderPath);
 }
 
-ComputePipeline::~ComputePipeline() {
+VulkanComputePipeline::~VulkanComputePipeline() {
     VkDevice device = m_device.getDevice();
 
     if (m_pipeline != VK_NULL_HANDLE) {
@@ -30,7 +30,7 @@ ComputePipeline::~ComputePipeline() {
     }
 }
 
-void ComputePipeline::createDescriptorSetLayout() {
+void VulkanComputePipeline::createDescriptorSetLayout() {
     std::vector<VkDescriptorSetLayoutBinding> bindings;
 
     // Binding 0: Storage Image (画像出力)
@@ -60,7 +60,7 @@ void ComputePipeline::createDescriptorSetLayout() {
     }
 }
 
-void ComputePipeline::createPipeline(const std::string& shaderPath) {
+void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
     // --- 1. シェーダーモジュールの作成 ---
     auto shaderCode = readFile(shaderPath);
 
@@ -101,7 +101,7 @@ void ComputePipeline::createPipeline(const std::string& shaderPath) {
     }
 }
 
-std::vector<char> ComputePipeline::readFile(const std::string& filename) {
+std::vector<char> VulkanComputePipeline::readFile(const std::string& filename) {
     // バイナリモードで末尾から開く（サイズ取得のため）
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 

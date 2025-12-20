@@ -1,8 +1,6 @@
 ﻿#include "Renderer.hpp"
-#include "CommandList.hpp"
 #include "ImageExporter.hpp"
-#include "GPUImage.hpp"
-#include "GPUBuffer.hpp"
+#include "rhi/RHI.hpp"
 #include <glm/glm.hpp>
 #include <iostream>
 struct SceneData {
@@ -10,7 +8,7 @@ struct SceneData {
     glm::vec4 params;     // time, frame, 0, 0
     glm::vec4 cameraPos;
 };
-Renderer::Renderer(GraphicsDevice& device, uint32_t width, uint32_t height)
+Renderer::Renderer(rhi::Device& device, uint32_t width, uint32_t height)
     : m_device(device), m_width(width), m_height(height) {
     setupResources();
     setupPipeline();
@@ -22,26 +20,26 @@ Renderer::~Renderer() {
 
 void Renderer::setupResources() {
     // 1. 出力用Image
-    m_outputImage = std::make_unique<GpuImage>(m_device, m_width, m_height);
+    m_outputImage = std::make_unique<rhi::Image>(m_device, m_width, m_height);
 
     // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
     VkDeviceSize imageSize = m_width * m_height * 4;
-    m_stagingBuffer = std::make_unique<GpuBuffer>(m_device.getAllocator(), imageSize,
+    m_stagingBuffer = std::make_unique<rhi::Buffer>(m_device.getAllocator(), imageSize,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
     // 3. Uniform Buffer (SceneData)
-    m_sceneBuffer = std::make_unique<GpuBuffer>(m_device.getAllocator(), sizeof(SceneData),
+    m_sceneBuffer = std::make_unique<rhi::Buffer>(m_device.getAllocator(), sizeof(SceneData),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 }
 
 void Renderer::setupPipeline() {
-    m_pipeline = std::make_unique<ComputePipeline>(m_device, "test.spv");
+    m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "test.spv");
     m_descManager = std::make_unique<DescriptorManager>(m_device);
 
     // ディスクリプタセットの構築
     m_descriptorSet = m_descManager->createBuilder(m_pipeline->getDescriptorSetLayout())
         .bindImage(0, m_outputImage->getView(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL)
-        .bindBuffer(1, m_sceneBuffer->getBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .bindBuffer(1, m_sceneBuffer->getNativeBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
         .build();
 }
 
@@ -52,7 +50,7 @@ void Renderer::render(float time) {
     scene.params = glm::vec4(time, 0, 0, 0);
     m_sceneBuffer->writeData(&scene, sizeof(SceneData));
 
-    CommandList cmd(m_device);
+    rhi::CommandList cmd(m_device);
     cmd.begin();
 
     // 1. Layout遷移: Undefined -> General
@@ -67,7 +65,7 @@ void Renderer::render(float time) {
     m_outputImage->transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     // 4. Image -> Buffer コピー
-    m_outputImage->copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer->getBuffer());
+    m_outputImage->copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer->getNativeBuffer());
 
     cmd.end();
     cmd.submitAndWait();

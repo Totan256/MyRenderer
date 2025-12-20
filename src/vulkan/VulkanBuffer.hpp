@@ -4,21 +4,21 @@
 #include <vk_mem_alloc.h>
 #include <cstring> // memcpy
 
-class GpuBuffer {
+class VulkanBuffer {
 public:
-    GpuBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
+    VulkanBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
     
-    ~GpuBuffer();
+    ~VulkanBuffer();
 
     // コピー禁止
-    GpuBuffer(const GpuBuffer&) = delete;
-    GpuBuffer& operator=(const GpuBuffer&) = delete;
+    VulkanBuffer(const VulkanBuffer&) = delete;
+    VulkanBuffer& operator=(const VulkanBuffer&) = delete;
 
     // データをCPUからGPUへ書き込む便利関数
     void writeData(const void* data, size_t size);
 
     // Vulkanハンドル取得
-    VkBuffer getBuffer() const { return m_buffer; }
+    VkBuffer getNativeBuffer() const { return m_buffer; }
     VkDeviceSize getSize() const { return m_size; }
     VmaAllocation getAllocation() const { return m_allocation; } 
 

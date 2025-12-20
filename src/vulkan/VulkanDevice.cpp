@@ -1,20 +1,20 @@
-﻿#include "GraphicsDevice.hpp"
+﻿#include "VulkanDevice.hpp"
 
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
-void GraphicsDevice::initialize(){
-    std::cout << "--- Initializing GraphicsDevice ---" << std::endl;
+void VulkanDevice::initialize(){
+    std::cout << "--- Initializing VulkanDevice ---" << std::endl;
     // ヘルパー関数の呼び出し。VK_CHECKが失敗時に例外を投げるため、安全に処理できます。
     createInstance();
     pickPhysicalDevice();
     createLogicalDevice();
     createAllocator();
-    std::cout << "--- GraphicsDevice Initialized Successfully ---" << std::endl;
+    std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
 }
 
-void GraphicsDevice::createInstance(){
+void VulkanDevice::createInstance(){
     // 1. アプリケーション情報の定義
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -54,7 +54,7 @@ void GraphicsDevice::createInstance(){
     // todo : デバッグメッセンジャーの作成処理
 }
 
-std::optional<uint32_t> GraphicsDevice::findComputeQueueFamilyIndex(VkPhysicalDevice device){
+std::optional<uint32_t> VulkanDevice::findComputeQueueFamilyIndex(VkPhysicalDevice device){
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
 
@@ -74,7 +74,7 @@ std::optional<uint32_t> GraphicsDevice::findComputeQueueFamilyIndex(VkPhysicalDe
     return std::nullopt;
 }
 
-void GraphicsDevice::pickPhysicalDevice(){
+void VulkanDevice::pickPhysicalDevice(){
     // 5. 物理デバイス（GPU）の列挙
     uint32_t deviceCount = 0;
     VK_CHECK(vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr));
@@ -108,7 +108,7 @@ void GraphicsDevice::pickPhysicalDevice(){
     throw std::runtime_error("failed to find a GPU with a Compute Queue Family!");
 }
 
-void GraphicsDevice::createLogicalDevice(){
+void VulkanDevice::createLogicalDevice(){
     // 6. キュー作成情報の定義（Compute Queue用）
     float queuePriority = 1.0f; // キューの優先度
     VkDeviceQueueCreateInfo queueCreateInfo{};
@@ -143,7 +143,7 @@ void GraphicsDevice::createLogicalDevice(){
     std::cout << "Compute Queue retrieved." << std::endl;
 }
 
-void GraphicsDevice::createAllocator(){
+void VulkanDevice::createAllocator(){
     // 11. VMAアロケータ作成情報の定義
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
@@ -163,7 +163,7 @@ void GraphicsDevice::createAllocator(){
 }
 
 
-GraphicsDevice::~GraphicsDevice(){
+VulkanDevice::~VulkanDevice(){
     // VMAアロケータの解放
     if (m_allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(m_allocator);
@@ -186,5 +186,5 @@ GraphicsDevice::~GraphicsDevice(){
         }
         vkDestroyInstance(m_instance, nullptr);
     }
-    std::cout << "GraphicsDevice destroyed." << std::endl;
+    std::cout << "VulkanDevice destroyed." << std::endl;
 }

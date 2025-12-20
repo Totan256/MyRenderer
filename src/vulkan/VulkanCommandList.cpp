@@ -1,8 +1,8 @@
-﻿#include "CommandList.hpp"
+﻿#include "VulkanCommandList.hpp"
 #include <stdexcept>
 #include <iostream>
 
-CommandList::CommandList(GraphicsDevice& device) : m_device(device) {
+VulkanCommandList::VulkanCommandList(VulkanDevice& device) : m_device(device) {
     VkDevice logicalDevice = m_device.getDevice();
 
     // 1. コマンドプールの作成
@@ -38,7 +38,7 @@ CommandList::CommandList(GraphicsDevice& device) : m_device(device) {
     }
 }
 
-CommandList::~CommandList() {
+VulkanCommandList::~VulkanCommandList() {
     VkDevice logicalDevice = m_device.getDevice();
     
     if (m_fence != VK_NULL_HANDLE) {
@@ -50,7 +50,7 @@ CommandList::~CommandList() {
     // コマンドバッファはプール破棄時に一緒に消えるので解放不要
 }
 
-void CommandList::begin() {
+void VulkanCommandList::begin() {
     // フェンスがシグナル状態（前回の実行完了）になるまで待つ
     // タイムアウトは最大値
     vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
@@ -66,13 +66,13 @@ void CommandList::begin() {
     }
 }
 
-void CommandList::end() {
+void VulkanCommandList::end() {
     if (vkEndCommandBuffer(m_commandBuffer) != VK_SUCCESS) {
         throw std::runtime_error("failed to record command buffer!");
     }
 }
 
-void CommandList::submitAndWait() {
+void VulkanCommandList::submitAndWait() {
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
@@ -88,11 +88,11 @@ void CommandList::submitAndWait() {
     vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
 }
 
-void CommandList::bindPipeline(const ComputePipeline& pipeline) {
+void VulkanCommandList::bindPipeline(const VulkanComputePipeline& pipeline) {
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getPipeline());
 }
 
-void CommandList::bindDescriptorSet(const ComputePipeline& pipeline, VkDescriptorSet descriptorSet) {
+void VulkanCommandList::bindDescriptorSet(const VulkanComputePipeline& pipeline, VkDescriptorSet descriptorSet) {
     vkCmdBindDescriptorSets(
         m_commandBuffer, 
         VK_PIPELINE_BIND_POINT_COMPUTE, 
@@ -101,6 +101,6 @@ void CommandList::bindDescriptorSet(const ComputePipeline& pipeline, VkDescripto
     );
 }
 
-void CommandList::dispatch(uint32_t x, uint32_t y, uint32_t z) {
+void VulkanCommandList::dispatch(uint32_t x, uint32_t y, uint32_t z) {
     vkCmdDispatch(m_commandBuffer, x, y, z);
 }
