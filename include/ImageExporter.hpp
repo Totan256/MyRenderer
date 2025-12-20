@@ -8,4 +8,5 @@ public:
     // width, height: 画像サイズ
     // pixels: バッファからmapして取得した生データ
     static void savePng(const std::string& filename, int width, int height, const void* pixels);
+    static void savePngUint8(const std::string& filename, int width, int height, const void* rawData);
 };

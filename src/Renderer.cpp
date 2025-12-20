@@ -1,34 +1,85 @@
 ﻿#include "Renderer.hpp"
+#include "CommandList.hpp"
+#include "ImageExporter.hpp"
+#include "GPUImage.hpp"
+#include "GPUBuffer.hpp"
 #include <glm/glm.hpp>
+#include <iostream>
 struct SceneData {
     glm::vec4 resolution; // width, height, 0, 0
     glm::vec4 params;     // time, frame, 0, 0
     glm::vec4 cameraPos;
 };
-// int m_width;
-// int m_height;
-// std::unique_ptr<GraphicsDevice> m_device;
-// std::unique_ptr<DescriptorManager> m_descManager;
-// std::unique_ptr<CommandList> m_cmdList;
-// std::unique_ptr<ComputePipeline> m_raytracePipeline;
-Renderer::Renderer(int width, int height){
-    m_width = width;
-    m_height = height;
-    m_device->initialize();
+Renderer::Renderer(GraphicsDevice& device, uint32_t width, uint32_t height)
+    : m_device(device), m_width(width), m_height(height) {
+    setupResources();
+    setupPipeline();
 }
 
-Renderer::~Renderer(){
-
+Renderer::~Renderer() {
+    // std::unique_ptr が自動的にリソースを解放
 }
 
-void Renderer::initialize(){
+void Renderer::setupResources() {
+    // 1. 出力用Image
+    m_outputImage = std::make_unique<GpuImage>(m_device, m_width, m_height);
 
+    // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
+    VkDeviceSize imageSize = m_width * m_height * 4;
+    m_stagingBuffer = std::make_unique<GpuBuffer>(m_device.getAllocator(), imageSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+
+    // 3. Uniform Buffer (SceneData)
+    m_sceneBuffer = std::make_unique<GpuBuffer>(m_device.getAllocator(), sizeof(SceneData),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 }
 
-void Renderer::render(){
+void Renderer::setupPipeline() {
+    m_pipeline = std::make_unique<ComputePipeline>(m_device, "test.spv");
+    m_descManager = std::make_unique<DescriptorManager>(m_device);
 
+    // ディスクリプタセットの構築
+    m_descriptorSet = m_descManager->createBuilder(m_pipeline->getDescriptorSetLayout())
+        .bindImage(0, m_outputImage->getView(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL)
+        .bindBuffer(1, m_sceneBuffer->getBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+        .build();
 }
 
-void Renderer::saveImage(const std::string& filename){
+void Renderer::render(float time) {
+    // シーン情報の更新
+    SceneData scene{};
+    scene.resolution = glm::vec4(m_width, m_height, 0, 0);
+    scene.params = glm::vec4(time, 0, 0, 0);
+    m_sceneBuffer->writeData(&scene, sizeof(SceneData));
 
+    CommandList cmd(m_device);
+    cmd.begin();
+
+    // 1. Layout遷移: Undefined -> General
+    m_outputImage->transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    // 2. Dispatch
+    cmd.bindPipeline(*m_pipeline);
+    cmd.bindDescriptorSet(*m_pipeline, m_descriptorSet);
+    cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
+
+    // 3. Layout遷移: General -> Transfer Source
+    m_outputImage->transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    // 4. Image -> Buffer コピー
+    m_outputImage->copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer->getBuffer());
+
+    cmd.end();
+    cmd.submitAndWait();
+}
+
+void Renderer::saveResult(const std::string& filename) {
+    // GPUの書き込みをCPUから見えるようにする
+    vmaInvalidateAllocation(m_device.getAllocator(), m_stagingBuffer->getAllocation(), 0, VK_WHOLE_SIZE);
+    
+    void* data = m_stagingBuffer->map();
+    ImageExporter::savePngUint8(filename, m_width, m_height, data);
+    m_stagingBuffer->unmap();
+    
+    std::cout << "Render result saved to " << filename << std::endl;
 }

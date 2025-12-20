@@ -33,15 +33,15 @@ ComputePipeline::~ComputePipeline() {
 void ComputePipeline::createDescriptorSetLayout() {
     std::vector<VkDescriptorSetLayoutBinding> bindings;
 
-    // Binding 0: Storage Buffer (画像出力)
+    // Binding 0: Storage Image (画像出力)
     VkDescriptorSetLayoutBinding outputBinding{};
     outputBinding.binding = 0;
-    outputBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    outputBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     outputBinding.descriptorCount = 1;
     outputBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     bindings.push_back(outputBinding);
 
-    // Binding 1: Uniform Buffer (シーンデータ) 【追加】
+    // Binding 1: Uniform Buffer (シーンデータ)
     VkDescriptorSetLayoutBinding sceneBinding{};
     sceneBinding.binding = 1;
     sceneBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -54,7 +54,8 @@ void ComputePipeline::createDescriptorSetLayout() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if (vkCreateDescriptorSetLayout(m_device.getDevice(), &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
+    if(vkCreateDescriptorSetLayout(m_device.getDevice(), &layoutInfo,
+            nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create descriptor set layout!");
     }
 }

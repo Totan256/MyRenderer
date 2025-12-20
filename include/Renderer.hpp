@@ -2,42 +2,44 @@
 #include "GraphicsDevice.hpp"
 #include "CommandList.hpp"
 #include "DescriptorManager.hpp"
+#include "GPUImage.hpp"
+#include "GPUBuffer.hpp"
 #include <memory>
 #include <vector>
 
 // 前方宣言
 class Texture; 
 class ComputePipeline;
+class GpuImage;
+
+
 
 class Renderer {
 public:
-    Renderer(int width, int height);
+    Renderer(GraphicsDevice& device, uint32_t width, uint32_t height);
     ~Renderer();
 
-    // 初期化関係
-    void initialize();
+    // レンダリングの実行
+    void render(float time);
 
-    // 描画実行（これを呼ぶと画像ができる）
-    void render();
-
-    // 結果の保存
-    void saveImage(const std::string& filename);
-
-    // リソース管理（これらをRendererが持つことで、mainがスッキリする）
-    GraphicsDevice& getDevice() { return *m_device; }
+    // 結果保存
+    void saveResult(const std::string& filename);
 
 private:
-    int m_width;
-    int m_height;
+    GraphicsDevice& m_device;
+    uint32_t m_width;
+    uint32_t m_height;
 
-    // コアシステム
-    std::unique_ptr<GraphicsDevice> m_device;
+    // リソース
+    std::unique_ptr<GpuImage> m_outputImage;
+    std::unique_ptr<GpuBuffer> m_stagingBuffer;
+    std::unique_ptr<GpuBuffer> m_sceneBuffer;
+
+    // パイプライン・ディスクリプタ
+    std::unique_ptr<ComputePipeline> m_pipeline;
     std::unique_ptr<DescriptorManager> m_descManager;
-    std::unique_ptr<CommandList> m_cmdList;
+    VkDescriptorSet m_descriptorSet;
 
-    // リソース（本来はResourceManagerクラスに持たせるが、まずはここ）
-    // std::unique_ptr<Texture> m_outputTexture; // まだGpuBufferのままでOK
-    
-    // パイプライン管理（簡易的な保持）
-    std::unique_ptr<ComputePipeline> m_raytracePipeline;
+    void setupResources();
+    void setupPipeline();
 };

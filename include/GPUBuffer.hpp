@@ -20,6 +20,7 @@ public:
     // Vulkanハンドル取得
     VkBuffer getBuffer() const { return m_buffer; }
     VkDeviceSize getSize() const { return m_size; }
+    VmaAllocation getAllocation() const { return m_allocation; } 
 
     void* map();
     void unmap();

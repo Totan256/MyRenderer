@@ -43,3 +43,17 @@ void ImageExporter::savePng(const std::string& filename, int width, int height, 
         std::cerr << "Failed to save image: " << filename << std::endl;
     }
 }
+
+void ImageExporter::savePngUint8(const std::string& filename, int width, int height, const void* rawData) {
+    // 1行あたりのバイト数 (RGBAなので width * 4)
+    int stride = width * 4;
+
+    // 変換の必要がないため、そのまま stbi_write_png に渡す
+    int result = stbi_write_png(filename.c_str(), width, height, 4, rawData, stride);
+
+    if (result) {
+        std::cout << "Saved image (uint8) to: " << filename << std::endl;
+    } else {
+        std::cerr << "Failed to save image: " << filename << std::endl;
+    }
+}

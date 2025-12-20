@@ -27,6 +27,8 @@ public:
     // 計算を実行する (Dispatch)
     void dispatch(uint32_t x, uint32_t y, uint32_t z);
 
+    VkCommandBuffer getCommandBuffer()const {return m_commandBuffer;}
+
 private:
     GraphicsDevice& m_device;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;

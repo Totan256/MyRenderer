@@ -10,7 +10,8 @@ public:
         // 汎用的なプールを作成（必要に応じて拡張・再確保するロジックを入れるのが一般的だが、今回は簡易版）
         std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 }
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 10}
         };
 
         VkDescriptorPoolCreateInfo poolInfo{};
@@ -73,6 +74,24 @@ public:
 
             return set;
         }
+        
+        Builder& bindImage(uint32_t binding, VkImageView view, VkDescriptorType type, VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL) {
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = layout;
+            imageInfo.imageView = view;
+            imageInfo.sampler = VK_NULL_HANDLE; // 今回はStorageImageなのでサンプラー不要
+
+            VkWriteDescriptorSet write{};
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstBinding = binding;
+            write.descriptorType = type;
+            write.descriptorCount = 1;
+            // ポインタ保持のためlistに追加 (m_imageInfosメンバ変数をlist<VkDescriptorImageInfo>型で追加してください)
+            write.pImageInfo = &m_imageInfos.emplace_back(imageInfo); 
+
+            m_writes.push_back(write);
+            return *this;
+        }
 
     private:
         GraphicsDevice& m_device;
@@ -81,7 +100,8 @@ public:
         std::vector<VkWriteDescriptorSet> m_writes;
         // std::vector は再確保でポインタが無効になる可能性があるため、
         // 本当は std::list を使うか、事前にresizeが必要だが、今回は簡易的にメンバに持たせずローカル変数的に使う前提
-        std::list<VkDescriptorBufferInfo> m_bufferInfos; 
+        std::list<VkDescriptorBufferInfo> m_bufferInfos;
+        std::list<VkDescriptorImageInfo> m_imageInfos;
     };
 
     Builder createBuilder(VkDescriptorSetLayout layout) {
