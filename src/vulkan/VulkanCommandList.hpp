@@ -23,6 +23,7 @@ public:
 
     // ディスクリプタセット（リソース）をセットする
     void bindDescriptorSet(const VulkanComputePipeline& pipeline, VkDescriptorSet descriptorSet);
+    void bindGlobalDescriptorSet(const VulkanComputePipeline& pipeline);
 
     // 計算を実行する (Dispatch)
     void dispatch(uint32_t x, uint32_t y, uint32_t z);

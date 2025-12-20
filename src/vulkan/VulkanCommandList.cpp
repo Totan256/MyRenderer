@@ -101,6 +101,15 @@ void VulkanCommandList::bindDescriptorSet(const VulkanComputePipeline& pipeline,
     );
 }
 
+void VulkanCommandList::bindGlobalDescriptorSet(const VulkanComputePipeline& pipeline) {
+    VkDescriptorSet globalSet = m_device.getBindlessDescriptorSet();
+    vkCmdBindDescriptorSets(
+        m_commandBuffer,
+        VK_PIPELINE_BIND_POINT_COMPUTE,
+        pipeline.getPipelineLayout(),
+        0, 1, &globalSet, 0, nullptr);
+}
+
 void VulkanCommandList::dispatch(uint32_t x, uint32_t y, uint32_t z) {
     vkCmdDispatch(m_commandBuffer, x, y, z);
 }

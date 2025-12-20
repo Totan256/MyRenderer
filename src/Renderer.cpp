@@ -8,6 +8,11 @@ struct SceneData {
     glm::vec4 params;     // time, frame, 0, 0
     glm::vec4 cameraPos;
 };
+struct PushConstants {
+    uint32_t outputImageIndex;
+    uint32_t sceneBufferIndex;
+};
+
 Renderer::Renderer(rhi::Device& device, uint32_t width, uint32_t height)
     : m_device(device), m_width(width), m_height(height) {
     setupResources();
@@ -34,13 +39,13 @@ void Renderer::setupResources() {
 
 void Renderer::setupPipeline() {
     m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "test.spv");
-    m_descManager = std::make_unique<DescriptorManager>(m_device);
+    //m_descManager = std::make_unique<DescriptorManager>(m_device);
 
     // ディスクリプタセットの構築
-    m_descriptorSet = m_descManager->createBuilder(m_pipeline->getDescriptorSetLayout())
-        .bindImage(0, m_outputImage->getView(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL)
-        .bindBuffer(1, m_sceneBuffer->getNativeBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-        .build();
+    // m_descriptorSet = m_descManager->createBuilder(m_pipeline->getDescriptorSetLayout())
+    //     .bindImage(0, m_outputImage->getView(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL)
+    //     .bindBuffer(1, m_sceneBuffer->getNativeBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+    //     .build();
 }
 
 void Renderer::render(float time) {
@@ -58,7 +63,13 @@ void Renderer::render(float time) {
 
     // 2. Dispatch
     cmd.bindPipeline(*m_pipeline);
-    cmd.bindDescriptorSet(*m_pipeline, m_descriptorSet);
+    cmd.bindGlobalDescriptorSet(*m_pipeline);
+    // インデックスだけをシェーダに渡す
+    PushConstants pc;
+    pc.outputImageIndex = m_outputImage->getBindlessIndex();
+    pc.sceneBufferIndex = m_sceneBuffer->getBindlessIndex();
+    vkCmdPushConstants(cmd.getCommandBuffer(), m_pipeline->getPipelineLayout(),
+                       VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
     cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
 
     // 3. Layout遷移: General -> Transfer Source

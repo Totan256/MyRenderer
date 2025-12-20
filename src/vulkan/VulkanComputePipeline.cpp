@@ -25,9 +25,9 @@ VulkanComputePipeline::~VulkanComputePipeline() {
     if (m_shaderModule != VK_NULL_HANDLE) {
         vkDestroyShaderModule(device, m_shaderModule, nullptr);
     }
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
-    }
+    // if (m_descriptorSetLayout != VK_NULL_HANDLE) {
+    //     vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
+    // }
 }
 
 void VulkanComputePipeline::createDescriptorSetLayout() {
@@ -54,10 +54,10 @@ void VulkanComputePipeline::createDescriptorSetLayout() {
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
 
-    if(vkCreateDescriptorSetLayout(m_device.getDevice(), &layoutInfo,
-            nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create descriptor set layout!");
-    }
+    // if(vkCreateDescriptorSetLayout(m_device.getDevice(), &layoutInfo,
+    //         nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
+    //     throw std::runtime_error("failed to create descriptor set layout!");
+    // }
 }
 
 void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
@@ -75,10 +75,11 @@ void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
 
     // --- 2. パイプラインレイアウトの作成 ---
     // (DescriptorSetLayout をまとめるもの)
+    VkDescriptorSetLayout layouts[] = { m_device.getBindlessLayout() };
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout; // さっき作ったレイアウトをセット
+    pipelineLayoutInfo.pSetLayouts = layouts; // さっき作ったレイアウトをセット
 
     if (vkCreatePipelineLayout(m_device.getDevice(), &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create pipeline layout!");

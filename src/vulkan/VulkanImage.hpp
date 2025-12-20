@@ -19,6 +19,7 @@ public:
 
     VkImage getImage() const {return m_image;}
     VkImageView getView() const {return m_view;}
+    uint32_t getBindlessIndex() const { return m_bindlessIndex; }
 
 private:
     VulkanDevice& m_device;
@@ -29,5 +30,7 @@ private:
     uint32_t m_width;
     uint32_t m_height;
     VkImageLayout m_currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    uint32_t m_bindlessIndex;
 };
 

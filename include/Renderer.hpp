@@ -29,8 +29,8 @@ private:
 
     // パイプライン・ディスクリプタ
     std::unique_ptr<rhi::ComputePipeline> m_pipeline;
-    std::unique_ptr<DescriptorManager> m_descManager;
-    VkDescriptorSet m_descriptorSet;
+    // std::unique_ptr<DescriptorManager> m_descManager;
+    // VkDescriptorSet m_descriptorSet;
 
     void setupResources();
     void setupPipeline();

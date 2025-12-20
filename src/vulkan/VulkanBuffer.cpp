@@ -2,8 +2,8 @@
 #include <stdexcept>
 #include <iostream>
 
-VulkanBuffer::VulkanBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
-    : m_allocator(allocator), m_size(size) {
+VulkanBuffer::VulkanBuffer(VulkanDevice& device, VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
+    : m_device(device), m_allocator(allocator), m_size(size) {
     
     // 1. バッファ作成情報の定義
     VkBufferCreateInfo bufferInfo = {};
@@ -31,10 +31,15 @@ VulkanBuffer::VulkanBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUs
     if (result != VK_SUCCESS) {
         throw std::runtime_error("Failed to create buffer!");
     }
+
+    m_bindlessIndex = device.registerBuffer(m_buffer, size);
 }
 
 VulkanBuffer::~VulkanBuffer() {
     // メモリとバッファを解放
+    if (m_buffer != VK_NULL_HANDLE) {
+        m_device.unregisterIndex(m_bindlessIndex);
+    }
     if (m_buffer != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
         vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
     }

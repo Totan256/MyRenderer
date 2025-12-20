@@ -43,6 +43,15 @@ public:
     VkQueue getComputeQueue() const { return m_computeQueue; }
     uint32_t getComputeQueueFamilyIndex() const { return m_computeQueueFamilyIndex; }
 
+    // Bindless用のセットとレイアウトを取得
+    VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
+    VkDescriptorSet getBindlessDescriptorSet() const { return m_bindlessDescriptorSet; }
+
+    // 空いているインデックスを割り当ててディスクリプタ更新
+    uint32_t registerBuffer(VkBuffer buffer, VkDeviceSize size);
+    uint32_t registerImage(VkImageView view);
+    void unregisterIndex(uint32_t index);
+
 private:
     VkInstance m_instance = VK_NULL_HANDLE;
     VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE; // デバッグ用
@@ -52,12 +61,27 @@ private:
     uint32_t m_computeQueueFamilyIndex = 0;
     
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    VkDescriptorPool m_bindlessPool= VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_bindlessLayout= VK_NULL_HANDLE;
+    VkDescriptorSet m_bindlessDescriptorSet= VK_NULL_HANDLE;
+    
+    // インデックス管理
+    std::vector<uint32_t> m_freeIndices; // 再利用可能なインデックス
+    uint32_t m_nextIndex = 0;           // 新規発行用カウンタ
+    std::mutex m_indexMutex;            // スレッド安全のため
+
+    const uint32_t MAX_BINDLESS_RESOURCES = 100000;
+    
+    void createBindlessResources(); // 初期化時に呼ぶ
+
+
 
     // 内部ヘルパー関数
     void createInstance();
     void pickPhysicalDevice();
     void createLogicalDevice();
     void createAllocator();
+    uint32_t allocateIndex();
 
     std::optional<uint32_t> findComputeQueueFamilyIndex(VkPhysicalDevice device);
 };

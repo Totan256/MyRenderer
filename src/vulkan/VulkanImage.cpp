@@ -49,10 +49,13 @@ VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height)
         nullptr, &m_view) != VK_SUCCESS){
         throw std::runtime_error("failed to create image view");
     }
+
+    m_bindlessIndex = device.registerImage(m_view);
 }
 
 VulkanImage::~VulkanImage(){
     if (m_view != VK_NULL_HANDLE) {
+        m_device.unregisterIndex(m_bindlessIndex);
         vkDestroyImageView(m_device.getDevice(), m_view, nullptr);
     }
     if (m_image != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {

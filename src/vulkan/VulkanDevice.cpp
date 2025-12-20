@@ -188,3 +188,99 @@ VulkanDevice::~VulkanDevice(){
     }
     std::cout << "VulkanDevice destroyed." << std::endl;
 }
+
+uint32_t VulkanDevice::allocateIndex() {
+    std::lock_guard<std::mutex> lock(m_indexMutex);
+    
+    if (!m_freeIndices.empty()) {
+        uint32_t index = m_freeIndices.back();
+        m_freeIndices.pop_back();
+        return index;
+    }
+
+    if (m_nextIndex >= MAX_BINDLESS_RESOURCES) {
+        throw std::runtime_error("Bindless descriptor limit reached!");
+    }
+    return m_nextIndex++;
+}
+void VulkanDevice::unregisterIndex(uint32_t index) {
+    std::lock_guard<std::mutex> lock(m_indexMutex);
+    m_freeIndices.push_back(index);
+}
+uint32_t VulkanDevice::registerBuffer(VkBuffer buffer, VkDeviceSize size) {
+    uint32_t index = allocateIndex();
+
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = size;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_bindlessDescriptorSet;
+    write.dstBinding = 0; // バッファ用のバインド番号（後述のレイアウト設定に合わせる）
+    write.dstArrayElement = index;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.descriptorCount = 1;
+    write.pBufferInfo = &bufferInfo;
+
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    return index;
+}
+
+uint32_t VulkanDevice::registerImage(VkImageView view) {
+    uint32_t index = allocateIndex();
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageInfo.imageView = view;
+    imageInfo.sampler = VK_NULL_HANDLE;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_bindlessDescriptorSet;
+    write.dstBinding = 1; // イメージ用のバインド番号
+    write.dstArrayElement = index;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    return index;
+}
+void VulkanDevice::createBindlessResources() {
+    // 1. レイアウトフラグの設定
+    VkDescriptorBindingFlags flags = 
+        VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | 
+        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{};
+    bindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    std::vector<VkDescriptorBindingFlags> allFlags = { flags, flags };
+    bindingFlags.bindingCount = 2;
+    bindingFlags.pBindingFlags = allFlags.data();
+
+    // 2. レイアウトの作成 (Binding 0: Buffers, Binding 1: Images)
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[0].descriptorCount = MAX_BINDLESS_RESOURCES;
+    bindings[0].stageFlags = VK_SHADER_STAGE_ALL;
+
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[1].descriptorCount = MAX_BINDLESS_RESOURCES;
+    bindings[1].stageFlags = VK_SHADER_STAGE_ALL;
+
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.pNext = &bindingFlags;
+    layoutInfo.bindingCount = 2;
+    layoutInfo.pBindings = bindings;
+    layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+
+    vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bindlessLayout);
+
+    // 3. プールの作成とセットの割り当て（省略：UPDATE_AFTER_BIND フラグを忘れずに）
+}

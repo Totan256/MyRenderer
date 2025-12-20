@@ -3,10 +3,11 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <cstring> // memcpy
+#include "vulkan/VulkanDevice.hpp"
 
 class VulkanBuffer {
 public:
-    VulkanBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
+    VulkanBuffer(VulkanDevice& device, VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
     
     ~VulkanBuffer();
 
@@ -25,9 +26,12 @@ public:
     void* map();
     void unmap();
 
+    uint32_t getBindlessIndex() const { return m_bindlessIndex; }
 private:
+    VulkanDevice& m_device;
     VmaAllocator m_allocator; // メモリ管理者の参照
     VkBuffer m_buffer = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE; // メモリの実体
     VkDeviceSize m_size;
+    uint32_t m_bindlessIndex;
 };
