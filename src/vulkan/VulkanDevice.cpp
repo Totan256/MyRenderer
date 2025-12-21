@@ -11,6 +11,8 @@ void VulkanDevice::initialize(){
     pickPhysicalDevice();
     createLogicalDevice();
     createAllocator();
+    createBindlessResources();
+
     std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
 }
 
@@ -119,12 +121,23 @@ void VulkanDevice::createLogicalDevice(){
 
     // 7. 有効化するデバイス機能
     VkPhysicalDeviceFeatures deviceFeatures{};
-    // 今回はComputeのみなので、特に有効化する機能は不要ですが、
-    // 必要に応じてここで `samplerAnisotropy` などを設定します。
+    // Descriptor Indexing Feature を有効化
+    VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
+    indexingFeatures.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    indexingFeatures.runtimeDescriptorArray = VK_TRUE;
+    indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+    indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
+    indexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+    indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
+    indexingFeatures.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+    indexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
 
     // 8. 論理デバイス作成情報の定義
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext = &indexingFeatures;
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pEnabledFeatures = &deviceFeatures;
@@ -163,14 +176,20 @@ void VulkanDevice::createAllocator(){
 }
 
 
-VulkanDevice::~VulkanDevice(){
-    // VMAアロケータの解放
-    if (m_allocator != VK_NULL_HANDLE) {
-        vmaDestroyAllocator(m_allocator);
-    }
-    
+VulkanDevice::~VulkanDevice(){    
     // 論理デバイスの解放
     if (m_device != VK_NULL_HANDLE) {
+        if (m_bindlessLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
+        }
+        if (m_bindlessPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
+        }
+        
+        // VMAアロケータやデバイス自体の破棄はその後
+        if (m_allocator != VK_NULL_HANDLE) {
+            vmaDestroyAllocator(m_allocator);
+        }
         vkDestroyDevice(m_device, nullptr);
     }
     
@@ -218,7 +237,7 @@ uint32_t VulkanDevice::registerBuffer(VkBuffer buffer, VkDeviceSize size) {
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = m_bindlessDescriptorSet;
-    write.dstBinding = 0; // バッファ用のバインド番号（後述のレイアウト設定に合わせる）
+    write.dstBinding = 0; // バッファ用のバインド番号
     write.dstArrayElement = index;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     write.descriptorCount = 1;
@@ -249,15 +268,18 @@ uint32_t VulkanDevice::registerImage(VkImageView view) {
     return index;
 }
 void VulkanDevice::createBindlessResources() {
+
     // 1. レイアウトフラグの設定
     VkDescriptorBindingFlags flags = 
         VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | 
-        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
-        VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
     VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{};
     bindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
-    std::vector<VkDescriptorBindingFlags> allFlags = { flags, flags };
+    std::vector<VkDescriptorBindingFlags> allFlags = {
+        flags,
+        flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
+    };
     bindingFlags.bindingCount = 2;
     bindingFlags.pBindingFlags = allFlags.data();
 
@@ -282,5 +304,33 @@ void VulkanDevice::createBindlessResources() {
 
     vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bindlessLayout);
 
-    // 3. プールの作成とセットの割り当て（省略：UPDATE_AFTER_BIND フラグを忘れずに）
+    //  プールの作成とセットの割り当て（UPDATE_AFTER_BIND フラグ
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_BINDLESS_RESOURCES },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_BINDLESS_RESOURCES}
+    };
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = 1;
+    vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_bindlessPool);
+
+    // ディスクリプタセットの割り当て
+    // 可変長配列（Variable Descriptor Count）を使用する場合 pNext で最大数を指定する必要があり
+    uint32_t maxBindingCounts[2] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES };
+    VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
+    variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+    variableCountInfo.descriptorSetCount = 1;
+    variableCountInfo.pDescriptorCounts = &maxBindingCounts[1]; // 最後のバインディング(Image)の最大数
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.pNext = &variableCountInfo; // ここで可変長配列の設定を渡す
+    allocInfo.descriptorPool = m_bindlessPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &m_bindlessLayout;
+
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_bindlessDescriptorSet));
 }

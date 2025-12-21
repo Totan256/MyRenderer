@@ -19,4 +19,11 @@ namespace rhi {
         BufferUsage usage;
         bool isCpuVisible;
     };
+    
+    enum class ShaderStage {
+        Compute = 0x1,
+        Vertex  = 0x2,
+        Fragment = 0x4,
+        All      = 0x7
+    };
 }

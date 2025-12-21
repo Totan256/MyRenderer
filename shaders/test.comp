@@ -1,18 +1,44 @@
 #version 450
+// バインドレス（Descriptor Indexing）を使用するための拡張機能
+#extension GL_EXT_nonuniform_qualifier : enable
+
 layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-// Binding 0: 書き込み用画像 (rgba8)
-layout(binding = 0, rgba8) uniform writeonly image2D outputImage;
+// Renderer.cpp の PushConstants 構造体と一致させる
+layout(push_constant) uniform PushConstants {
+    uint outputImageIndex;
+    uint sceneBufferIndex;
+} pc;
 
-layout(std140, binding = 1) uniform SceneData {
+// VulkanDevice.cpp のレイアウト定義に合わせる
+// Binding 0: Storage Buffer の配列 (SceneData用)
+struct SceneData {
     vec4 resolution;
     vec4 params;
     vec4 cameraPos;
-} scene;
+};
+layout(set = 0, binding = 0) buffer SceneDataBuffer {
+    SceneData data;
+} sceneBuffers[];
+
+// Binding 1: Storage Image の配列 (画像出力用)
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D outputImages[];
 
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+    // プッシュ定数からインデックスを取得してリソースを特定
+    // シーン情報の参照 (SSBOとしてアクセス)
+    SceneData scene = sceneBuffers[pc.sceneBufferIndex].data;
+    
+    float width = scene.resolution.x;
+    float height = scene.resolution.y;
 
-    // 画像へ書き込み (vec4)
-    imageStore(outputImage, pixel_coords, vec4(1.0,0.0,0.0, 1.0));
+    // 画面外チェック
+    if (pixel_coords.x >= width || pixel_coords.y >= height) {
+        return;
+    }
+
+    // 画像へ書き込み (インデックス指定)
+    // ここではデバッグ用に赤色を書き込み [cite: 4]
+    imageStore(outputImages[pc.outputImageIndex], pixel_coords, vec4(1.0, 0.0, 0.0, 1.0));
 }

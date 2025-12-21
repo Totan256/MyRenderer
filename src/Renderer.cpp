@@ -29,23 +29,17 @@ void Renderer::setupResources() {
 
     // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
     VkDeviceSize imageSize = m_width * m_height * 4;
-    m_stagingBuffer = std::make_unique<rhi::Buffer>(m_device.getAllocator(), imageSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-
+    m_stagingBuffer = std::make_unique<rhi::Buffer>(m_device, m_device.getAllocator(), imageSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // TRANSFER_DSTを追加
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
     // 3. Uniform Buffer (SceneData)
-    m_sceneBuffer = std::make_unique<rhi::Buffer>(m_device.getAllocator(), sizeof(SceneData),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    m_sceneBuffer = std::make_unique<rhi::Buffer>(m_device, m_device.getAllocator(), sizeof(SceneData),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // 修正
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 }
 
 void Renderer::setupPipeline() {
     m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "test.spv");
-    //m_descManager = std::make_unique<DescriptorManager>(m_device);
-
-    // ディスクリプタセットの構築
-    // m_descriptorSet = m_descManager->createBuilder(m_pipeline->getDescriptorSetLayout())
-    //     .bindImage(0, m_outputImage->getView(), VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL)
-    //     .bindBuffer(1, m_sceneBuffer->getNativeBuffer(), sizeof(SceneData), VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
-    //     .build();
 }
 
 void Renderer::render(float time) {

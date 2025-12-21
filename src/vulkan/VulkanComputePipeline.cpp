@@ -73,13 +73,21 @@ void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
         throw std::runtime_error("failed to create shader module!");
     }
 
+    VkDescriptorSetLayout layouts[] = { m_device.getBindlessLayout() };
+
     // --- 2. パイプラインレイアウトの作成 ---
     // (DescriptorSetLayout をまとめるもの)
-    VkDescriptorSetLayout layouts[] = { m_device.getBindlessLayout() };
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = 8;// PushConstants 構造体のサイズ (uint32_t x 2)
+    
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = layouts; // さっき作ったレイアウトをセット
+    pipelineLayoutInfo.pSetLayouts = layouts;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(m_device.getDevice(), &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("failed to create pipeline layout!");
