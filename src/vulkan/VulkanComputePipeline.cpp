@@ -3,8 +3,8 @@
 #include <iostream>
 #include <stdexcept>
 
-VulkanComputePipeline::VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath)
-    : m_device(device) {
+VulkanComputePipeline::VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath, uint32_t pushContentsSize)
+    : m_device(device), m_pushContentsSize(pushContentsSize){
     
     // 1. ディスクリプタセットレイアウトの作成（Binding=0にStorageBufferがあることを定義）
     createDescriptorSetLayout();
@@ -80,7 +80,7 @@ void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = 8;// PushConstants 構造体のサイズ (uint32_t x 2)
+    pushConstantRange.size = m_pushContentsSize;// PushConstants 構造体のサイズ
     
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

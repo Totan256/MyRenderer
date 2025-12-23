@@ -15,7 +15,7 @@ public:
     void render(float time);
 
     // 結果保存
-    void saveResult(const std::string& filename);
+    void saveResult(const std::string& filename, rhi::Buffer& stagingBuffer);
 
 private:
     rhi::Device& m_device;
@@ -23,9 +23,9 @@ private:
     uint32_t m_height;
 
     // リソース
-    std::unique_ptr<rhi::Image> m_outputImage;
-    std::unique_ptr<rhi::Buffer> m_stagingBuffer;
-    std::unique_ptr<rhi::Buffer> m_sceneBuffer;
+    // std::unique_ptr<rhi::Image> m_outputImage;
+    // std::unique_ptr<rhi::Buffer> m_stagingBuffer;
+    // std::unique_ptr<rhi::Buffer> m_sceneBuffer;
 
     // パイプライン・ディスクリプタ
     std::unique_ptr<rhi::ComputePipeline> m_pipeline;

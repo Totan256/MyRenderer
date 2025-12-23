@@ -20,7 +20,7 @@ int main() {
         // 実行と保存
         std::cout << "Rendering..." << std::endl;
         renderer.render(1.5f); // 1.5秒時点の絵を描画
-        renderer.saveResult("output_refactored.png");
+        //renderer.saveResult("output_refactored.png");
 
         std::cout << "Success!" << std::endl;
 

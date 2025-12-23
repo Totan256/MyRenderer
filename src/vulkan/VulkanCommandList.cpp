@@ -1,4 +1,5 @@
 ﻿#include "VulkanCommandList.hpp"
+#include "RHI.hpp"
 #include <stdexcept>
 #include <iostream>
 
@@ -88,25 +89,26 @@ void VulkanCommandList::submitAndWait() {
     vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
 }
 
-void VulkanCommandList::bindPipeline(const VulkanComputePipeline& pipeline) {
+void VulkanCommandList::bindPipeline(VulkanComputePipeline& pipeline) {
+    m_pipeline = &pipeline;
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getPipeline());
 }
 
-void VulkanCommandList::bindDescriptorSet(const VulkanComputePipeline& pipeline, VkDescriptorSet descriptorSet) {
+void VulkanCommandList::bindDescriptorSet(VkDescriptorSet descriptorSet) {
     vkCmdBindDescriptorSets(
         m_commandBuffer, 
         VK_PIPELINE_BIND_POINT_COMPUTE, 
-        pipeline.getPipelineLayout(), 
+        m_pipeline->getPipelineLayout(), 
         0, 1, &descriptorSet, 0, nullptr
     );
 }
 
-void VulkanCommandList::bindGlobalDescriptorSet(const VulkanComputePipeline& pipeline) {
+void VulkanCommandList::bindGlobalDescriptorSet() {
     VkDescriptorSet globalSet = m_device.getBindlessDescriptorSet();
     vkCmdBindDescriptorSets(
         m_commandBuffer,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline.getPipelineLayout(),
+        m_pipeline->getPipelineLayout(),
         0, 1, &globalSet, 0, nullptr);
 }
 

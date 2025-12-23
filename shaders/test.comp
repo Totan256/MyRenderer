@@ -8,6 +8,8 @@ layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 layout(push_constant) uniform PushConstants {
     uint outputImageIndex;
     uint sceneBufferIndex;
+    uint resX;
+    uint resY;
 } pc;
 
 // VulkanDevice.cpp のレイアウト定義に合わせる
@@ -26,19 +28,17 @@ layout(set = 0, binding = 1, rgba8) uniform writeonly image2D outputImages[];
 
 void main() {
     ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
-    // プッシュ定数からインデックスを取得してリソースを特定
-    // シーン情報の参照 (SSBOとしてアクセス)
-    SceneData scene = sceneBuffers[pc.sceneBufferIndex].data;
     
-    float width = scene.resolution.x;
-    float height = scene.resolution.y;
+    vec2 uv = pixel_coords/vec2(pc.resX, pc.resY);
 
-    // 画面外チェック
-    if (pixel_coords.x >= width || pixel_coords.y >= height) {
-        return;
-    }
+    vec3 col = vec3(1);
+
+    col*=0.;
+
+    if(uv.x > 0.5) col.x = 1.;
+    if(uv.y > 0.5) col.y = 1.;
 
     // 画像へ書き込み (インデックス指定)
     // ここではデバッグ用に赤色を書き込み [cite: 4]
-    imageStore(outputImages[pc.outputImageIndex], pixel_coords, vec4(1.0, 0.0, 0.0, 1.0));
+    imageStore(outputImages[pc.outputImageIndex], pixel_coords, vec4(col, 1.0));
 }

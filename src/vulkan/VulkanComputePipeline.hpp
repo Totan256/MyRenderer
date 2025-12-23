@@ -8,7 +8,7 @@
 class VulkanComputePipeline {
 public:
     // コンストラクタでパイプライン構築まで行う
-    VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath);
+    VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath, uint32_t pushContentsSize);
     ~VulkanComputePipeline();
 
     // Vulkanハンドル取得
@@ -16,8 +16,10 @@ public:
     VkPipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
     //VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
 
+    uint32_t getPushContentsSize() const {return m_pushContentsSize;}
 private:
     VulkanDevice& m_device; // デバイスへの参照を保持
+    const uint32_t m_pushContentsSize;
     
     VkPipeline m_pipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
