@@ -1,0 +1,9 @@
+C:\Users\finag\Git\MyRenderer\main.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\main.obj
+C:\Users\finag\Git\MyRenderer\src\ImageExporter.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\ImageExporter.obj
+C:\Users\finag\Git\MyRenderer\src\Renderer.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\Renderer.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanBuffer.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanBuffer.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanCommandList.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanCommandList.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanComputePipeline.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanComputePipeline.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanDescriptorManager.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanDescriptorManager.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanDevice.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanDevice.obj
+C:\Users\finag\Git\MyRenderer\src\vulkan\VulkanImage.cpp;C:\Users\finag\Git\MyRenderer\out\build\local-assimp\RendererApp.dir\Debug\VulkanImage.obj

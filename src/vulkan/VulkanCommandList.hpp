@@ -10,7 +10,7 @@ class VulkanCommandList {
 public:
     VulkanCommandList(VulkanDevice& device);
     ~VulkanCommandList();
-
+    
     // コマンド記録の開始と終了
     void begin();
     void end();
@@ -32,12 +32,6 @@ public:
 
     VkCommandBuffer getCommandBuffer()const {return m_commandBuffer;}
 
-    // bufferまたはimage用
-    // template<typename T>
-    // void setPushResource(uint32_t offset, const T& resource) {
-    //     uint32_t index = resource.getBindlessIndex();
-    //     setPushData(offset, sizeof(uint32_t), &index);
-    // }
     void setPushResource(uint32_t offset, const VulkanBuffer& resource) {
         uint32_t index = resource.getBindlessIndex();
         setPushData(offset, sizeof(uint32_t), &index);
@@ -65,5 +59,5 @@ private:
     VulkanComputePipeline* m_pipeline = nullptr;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
-    VkFence m_fence = VK_NULL_HANDLE; // 完了待ちのための信号機
+    VkFence m_fence = VK_NULL_HANDLE; // 完了待ちのためのフェンス
 };

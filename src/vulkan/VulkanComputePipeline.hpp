@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <vulkan/vulkan.h>
+#include <shaderc/shaderc.hpp>
 #include <string>
 #include <vector>
 #include "VulkanDevice.hpp"
@@ -27,7 +28,8 @@ private:
     VkShaderModule m_shaderModule = VK_NULL_HANDLE;
 
     // ファイル読み込みヘルパー
-    static std::vector<char> readFile(const std::string& filename);
+    static std::vector<uint32_t> readFile(const std::string& filename);
+    static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath);
 
     void createDescriptorSetLayout();
     void createPipeline(const std::string& shaderPath);

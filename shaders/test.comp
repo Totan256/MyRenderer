@@ -35,7 +35,7 @@ void main() {
 
     col*=0.;
 
-    if(uv.x > 0.5) col.x = 1.;
+    if(uv.x < 0.5) col.x = 1.;
     if(uv.y > 0.5) col.y = 1.;
 
     // 画像へ書き込み (インデックス指定)

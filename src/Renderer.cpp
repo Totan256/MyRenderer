@@ -28,7 +28,7 @@ void Renderer::setupResources() {
 }
 
 void Renderer::setupPipeline() {
-    m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "test.spv", 16); //構造体のサイズ (uint32_t x 2)
+    m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "shaders/test.comp", 16); //構造体のサイズ (uint32_t x 2)
 }
 
 void Renderer::render(float time) {
@@ -61,11 +61,6 @@ void Renderer::render(float time) {
     cmd.bindPipeline(*m_pipeline);
     cmd.bindGlobalDescriptorSet();
     // インデックスだけをシェーダに渡す
-    // PushConstants pc;
-    // pc.outputImageIndex = m_outputImage->getBindlessIndex();
-    // pc.sceneBufferIndex = m_sceneBuffer->getBindlessIndex();
-    // vkCmdPushConstants(cmd.getCommandBuffer(), m_pipeline->getPipelineLayout(),
-    //                    VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
     cmd.setPushResource(0, m_outputImage);
     cmd.setPushResource(4, m_sceneBuffer);
     cmd.setPushData(8, sizeof(m_width), &m_width);

@@ -1,0 +1,359 @@
+{
+	"inputs" : 
+	[
+		{
+			"path" : "CMakeLists.txt"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "out/build/local-assimp/CMakeFiles/3.31.0-rc1/CMakeSystem.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/scripts/buildsystems/vcpkg.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeDependentOption.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeSystemSpecificInitialize.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows-Initialize.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "out/build/local-assimp/CMakeFiles/3.31.0-rc1/CMakeCXXCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeSystemSpecificInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeGenericSystem.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeInitializeConfigs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/WindowsPaths.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeCXXInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/MSVC-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/MSVC.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows-MSVC-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows-MSVC.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "out/build/local-assimp/CMakeFiles/3.31.0-rc1/CMakeRCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeRCInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeRCLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeCXXLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Linker/Windows-MSVC-CXX.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Linker/Windows-MSVC.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/FindVulkan.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageMessage.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/VulkanMemoryAllocator/VulkanMemoryAllocatorConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/VulkanMemoryAllocator/VulkanMemoryAllocatorConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glm/glmConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glm/glmConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glm/glmConfig-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glm/glmConfig-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/stb/vcpkg-cmake-wrapper.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/stb/FindStb.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageMessage.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/SelectLibraryConfigurations.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_core/spirv_cross_coreConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_core/spirv_cross_coreConfig-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_core/spirv_cross_coreConfig-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_glsl/spirv_cross_glslConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_glsl/spirv_cross_glslConfig-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv_cross_glsl/spirv_cross_glslConfig-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/cmake-libs/assimp/installed/lib/cmake/assimp-6.0/assimpConfigVersion.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/cmake-libs/assimp/installed/lib/cmake/assimp-6.0/assimpConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/cmake-libs/assimp/installed/lib/cmake/assimp-6.0/assimpTargets.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/cmake-libs/assimp/installed/lib/cmake/assimp-6.0/assimpTargets-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/lodepng/lodepng-config.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/lodepng/lodepng-targets.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/lodepng/lodepng-targets-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/lodepng/lodepng-targets-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/unofficial-shaderc/unofficial-shaderc-config.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeFindDependencyMacro.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glslang/glslang-config-version.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glslang/glslang-config.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeFindDependencyMacro.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glslang/glslang-targets.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glslang/glslang-targets-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/glslang/glslang-targets-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsTarget.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsTarget-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsTarget-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools-opt/SPIRV-Tools-optConfig.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeFindDependencyMacro.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsConfig.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools/SPIRV-ToolsTarget.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools-opt/SPIRV-Tools-optTargets.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools-opt/SPIRV-Tools-optTargets-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/spirv-tools-opt/SPIRV-Tools-optTargets-release.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/unofficial-shaderc/unofficial-shaderc-targets.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/unofficial-shaderc/unofficial-shaderc-targets-debug.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/Users/finag/Git/vcpkg/installed/x64-windows/share/unofficial-shaderc/unofficial-shaderc-targets-release.cmake"
+		}
+	],
+	"kind" : "cmakeFiles",
+	"paths" : 
+	{
+		"build" : "C:/Users/finag/Git/MyRenderer/out/build/local-assimp",
+		"source" : "C:/Users/finag/Git/MyRenderer"
+	},
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 1
+	}
+}
