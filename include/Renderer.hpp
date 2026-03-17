@@ -8,8 +8,12 @@
 
 class Renderer {
 public:
-    Renderer(rhi::Device& device, uint32_t width, uint32_t height);
-    ~Renderer();
+    Renderer(rhi::Device& device, uint32_t width, uint32_t height)
+        : m_device(device), m_width(width), m_height(height) {
+    }
+    ~Renderer(){
+        
+    }
 
     // レンダリングの実行
     void render(float time);
@@ -28,10 +32,10 @@ private:
     // std::unique_ptr<rhi::Buffer> m_sceneBuffer;
 
     // パイプライン・ディスクリプタ
-    std::unique_ptr<rhi::ComputePipeline> m_pipeline;
+    // std::unique_ptr<rhi::ComputePipeline> m_pipeline;
     // std::unique_ptr<DescriptorManager> m_descManager;
     // VkDescriptorSet m_descriptorSet;
 
-    void setupResources();
-    void setupPipeline();
+    // void setupResources();
+    // void setupPipeline();
 };

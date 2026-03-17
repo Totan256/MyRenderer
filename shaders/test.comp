@@ -39,6 +39,6 @@ void main() {
     if(uv.y > 0.5) col.y = 1.;
 
     // 画像へ書き込み (インデックス指定)
-    // ここではデバッグ用に赤色を書き込み [cite: 4]
+    // ここではデバッグ用に赤色を書き込み
     imageStore(outputImages[pc.outputImageIndex], pixel_coords, vec4(col, 1.0));
 }

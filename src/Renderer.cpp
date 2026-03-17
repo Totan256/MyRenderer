@@ -13,25 +13,10 @@ struct PushConstants {
     uint32_t sceneBufferIndex;
 };
 
-Renderer::Renderer(rhi::Device& device, uint32_t width, uint32_t height)
-    : m_device(device), m_width(width), m_height(height) {
-    setupResources();
-    setupPipeline();
-}
 
-Renderer::~Renderer() {
-    // std::unique_ptr が自動的にリソースを解放
-}
-
-void Renderer::setupResources() {
-    
-}
-
-void Renderer::setupPipeline() {
-    m_pipeline = std::make_unique<rhi::ComputePipeline>(m_device, "shaders/test.comp", 16); //構造体のサイズ (uint32_t x 2)
-}
 
 void Renderer::render(float time) {
+    rhi::ComputePipeline m_pipeline(m_device, "shaders/test.comp", 16);
     // 1. 出力用Image
     rhi::Image m_outputImage(m_device, m_width, m_height);
 
@@ -58,7 +43,7 @@ void Renderer::render(float time) {
     m_outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
     // 2. Dispatch
-    cmd.bindPipeline(*m_pipeline);
+    cmd.bindPipeline(m_pipeline);
     cmd.bindGlobalDescriptorSet();
     // インデックスだけをシェーダに渡す
     cmd.setPushResource(0, m_outputImage);
