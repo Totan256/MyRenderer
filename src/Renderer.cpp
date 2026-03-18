@@ -13,12 +13,10 @@ struct PushConstants {
     uint32_t sceneBufferIndex;
 };
 
-
-
 void Renderer::render(float time) {
-    rhi::ComputePipeline m_pipeline(m_device, "shaders/test.comp", 16);
+    rhi::ComputePipeline pipeline(m_device, "shaders/test.comp", 16);
     // 1. 出力用Image
-    rhi::Image m_outputImage(m_device, m_width, m_height);
+    rhi::Image outputImage(m_device, m_width, m_height);
 
     // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
     VkDeviceSize imageSize = m_width * m_height * 4;
@@ -26,7 +24,7 @@ void Renderer::render(float time) {
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // TRANSFER_DSTを追加
         VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
     // 3. Uniform Buffer (SceneData)
-    rhi::Buffer m_sceneBuffer(m_device, m_device.getAllocator(), sizeof(SceneData),
+    rhi::Buffer sceneBuffer(m_device, m_device.getAllocator(), sizeof(SceneData),
         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // 修正
         VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
@@ -34,20 +32,20 @@ void Renderer::render(float time) {
     SceneData scene{};
     scene.resolution = glm::vec4(m_width, m_height, 0, 0);
     scene.params = glm::vec4(time, 0, 0, 0);
-    m_sceneBuffer.writeData(&scene, sizeof(SceneData));
+    sceneBuffer.writeData(&scene, sizeof(SceneData));
 
     rhi::CommandList cmd(m_device);
     cmd.begin();
 
-    // 1. Layout遷移: Undefined -> General
-    m_outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    // 1. Layout遷移:General
+    outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL);
 
     // 2. Dispatch
-    cmd.bindPipeline(m_pipeline);
+    cmd.bindPipeline(pipeline);
     cmd.bindGlobalDescriptorSet();
     // インデックスだけをシェーダに渡す
-    cmd.setPushResource(0, m_outputImage);
-    cmd.setPushResource(4, m_sceneBuffer);
+    cmd.setPushResource(0, outputImage);
+    cmd.setPushResource(4, sceneBuffer);
     cmd.setPushData(8, sizeof(m_width), &m_width);
     cmd.setPushData(12, sizeof(m_height), &m_height);
 
@@ -55,10 +53,10 @@ void Renderer::render(float time) {
     cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
 
     // Layout遷移General->Transfer
-    m_outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
     // Image -> Buffer コピー
-    m_outputImage.copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer.getNativeBuffer());
+    outputImage.copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer.getNativeBuffer());
 
     cmd.end();
     cmd.submitAndWait();

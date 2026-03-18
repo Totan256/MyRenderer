@@ -26,4 +26,12 @@ namespace rhi {
         Fragment = 0x4,
         All      = 0x7
     };
+
+    enum class ResourceUsage {
+        Undefined,
+        ComputeWrite, // Compute Shaderでの書き込み (Storage Image)
+        TransferSrc,  // コピー元
+        TransferDst,  // コピー先
+        Sampled       // テクスチャとして読み取り
+    };
 }

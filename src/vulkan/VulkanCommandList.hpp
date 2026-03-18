@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <vulkan/vulkan.h>
+#include "RHIcommon.hpp"
 #include "VulkanDevice.hpp"
 #include "VulkanComputePipeline.hpp"
 #include "VulkanBuffer.hpp"
