@@ -20,8 +20,15 @@ public:
     VkImage getImage() const {return m_image;}
     VkImageView getView() const {return m_view;}
     uint32_t getBindlessIndex() const { return m_bindlessIndex; }
+
     rhi::ResourceUsage getCurrentUsage() const { return m_usage; }
-    void setCurrentUsage(rhi::ResourceUsage usage) { m_usage = usage; }
+    rhi::ShaderStage   getCurrentStage() const { return m_stage; }
+    
+    void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) {
+        m_usage = usage;
+        m_stage = stage;
+    }
+    
 private:
     VulkanDevice& m_device;
     VkImage m_image = VK_NULL_HANDLE;
@@ -30,8 +37,9 @@ private:
 
     uint32_t m_width;
     uint32_t m_height;
-    VkImageLayout m_currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;// 後で消す
+    
     rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
+    rhi::ShaderStage m_stage = rhi::ShaderStage::None;
 
     uint32_t m_bindlessIndex;
 };

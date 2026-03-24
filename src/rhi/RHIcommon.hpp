@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 namespace rhi {
     enum class BufferUsage {
@@ -20,18 +20,48 @@ namespace rhi {
         bool isCpuVisible;
     };
     
-    enum class ShaderStage {
-        Compute = 0x1,
-        Vertex  = 0x2,
-        Fragment = 0x4,
-        All      = 0x7
+    enum class ShaderStage : uint64_t {
+        None          = 0,
+        Top           = 1ULL << 0, // 全体の先頭
+        DrawIndirect  = 1ULL << 1,
+        Vertex        = 1ULL << 2,
+        Fragment      = 1ULL << 3,
+        Compute       = 1ULL << 4,
+        Transfer      = 1ULL << 5,
+        EarlyFragment = 1ULL << 6,
+        LateFragment  = 1ULL << 7,
+        RayTracing    = 1ULL << 8,
+        
+        AllGraphics   = Vertex | Fragment | EarlyFragment | LateFragment,
+        All           = ~0ULL
     };
 
-    enum class ResourceUsage {
+    // リソースが「何として」使われるか（AccessとLayoutに対応）
+    enum class ResourceUsage : uint32_t {
         Undefined,
-        ComputeWrite, // Compute Shaderでの書き込み (Storage Image)
-        TransferSrc,  // コピー元
-        TransferDst,  // コピー先
-        Sampled       // テクスチャとして読み取り
+        // Read系
+        ConstantBuffer,
+        VertexBuffer,
+        IndexBuffer,
+        SampledTexture,   // Descriptor 経由の Read
+        StorageRead,      // RWTexture/Buffer の Read
+        InputAttachment,  // サブパス入力
+        DepthStencilRead, // 影マップ読み取り
+        
+        // Write系
+        ColorAttachment,
+        DepthStencilWrite,
+        StorageWrite,     // RWTexture/Buffer の Write
+        
+        // その他
+        TransferSrc,
+        TransferDst,
+        Present
+    };
+    
+    struct ResourceRequirement {
+        uint32_t      slotIndex;
+        ResourceUsage usage;
+        ShaderStage   stage;
     };
 }

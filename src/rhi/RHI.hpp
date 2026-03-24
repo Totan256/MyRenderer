@@ -7,6 +7,7 @@
     #include "vulkan/VulkanComputePipeline.hpp"
     #include "vulkan/VulkanDescriptorManager.hpp"
     #include "vulkan/VulkanImage.hpp"
+    #include "vulkan/VulkanRenderGraph.hpp"
     
     namespace rhi {
         using Device = VulkanDevice;
@@ -14,6 +15,7 @@
         using CommandList = VulkanCommandList;
         using Image = VulkanImage;
         using ComputePipeline = VulkanComputePipeline;
+        using RenderGraph = VulkanRenderGraph;
     }
 #elif defined(RHI_USE_DX12)
     #include "dx12/DX12Device.hpp"

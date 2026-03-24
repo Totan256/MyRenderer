@@ -62,7 +62,7 @@ VulkanImage::~VulkanImage(){
         vmaDestroyImage(m_device.getAllocator(), m_image, m_allocation);
     }
 }
-
+/*
 void VulkanImage::transitionLayout(VkCommandBuffer cmd, VkImageLayout newLayout){
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -109,6 +109,7 @@ void VulkanImage::transitionLayout(VkCommandBuffer cmd, VkImageLayout newLayout)
     m_currentLayout = newLayout;   
 }
 
+*/
 void VulkanImage::copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer) {
     VkBufferImageCopy region{};
     region.bufferOffset = 0;

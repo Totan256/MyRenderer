@@ -26,16 +26,4 @@ private:
     uint32_t m_width;
     uint32_t m_height;
 
-    // リソース
-    // std::unique_ptr<rhi::Image> m_outputImage;
-    // std::unique_ptr<rhi::Buffer> m_stagingBuffer;
-    // std::unique_ptr<rhi::Buffer> m_sceneBuffer;
-
-    // パイプライン・ディスクリプタ
-    // std::unique_ptr<rhi::ComputePipeline> m_pipeline;
-    // std::unique_ptr<DescriptorManager> m_descManager;
-    // VkDescriptorSet m_descriptorSet;
-
-    // void setupResources();
-    // void setupPipeline();
 };

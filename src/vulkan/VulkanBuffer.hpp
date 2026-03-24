@@ -10,7 +10,7 @@ public:
     VulkanBuffer(VulkanDevice& device, VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
     
     ~VulkanBuffer();
-
+    
     // コピー禁止
     VulkanBuffer(const VulkanBuffer&) = delete;
     VulkanBuffer& operator=(const VulkanBuffer&) = delete;
