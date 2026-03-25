@@ -64,4 +64,13 @@ namespace rhi {
         ResourceUsage usage;
         ShaderStage   stage;
     };
+
+    class Resource {
+    public:
+        virtual ~Resource() = default;
+        virtual bool isImage() const = 0;
+        virtual ResourceUsage getCurrentUsage() const = 0;
+        virtual ShaderStage   getCurrentStage() const = 0;
+        virtual void setState(ResourceUsage usage, ShaderStage stage) = 0;
+    };
 }

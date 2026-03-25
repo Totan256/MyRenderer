@@ -5,7 +5,7 @@
 #include <cstring> // memcpy
 #include "vulkan/VulkanDevice.hpp"
 
-class VulkanBuffer {
+class VulkanBuffer : public rhi::Resource {
 public:
     VulkanBuffer(VulkanDevice& device, VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
     
@@ -27,11 +27,24 @@ public:
     void unmap();
 
     uint32_t getBindlessIndex() const { return m_bindlessIndex; }
+
+    rhi::ResourceUsage getCurrentUsage() const override { return m_usage; }
+    rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
+    
+    void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) override {
+        m_usage = usage;
+        m_stage = stage;
+    }
+    bool isImage() const override { return false; }
 private:
     VulkanDevice& m_device;
     VmaAllocator m_allocator; // メモリ管理者の参照
     VkBuffer m_buffer = VK_NULL_HANDLE;
     VmaAllocation m_allocation = VK_NULL_HANDLE; // メモリの実体
     VkDeviceSize m_size;
+
+    rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
+    rhi::ShaderStage m_stage = rhi::ShaderStage::None;
+    
     uint32_t m_bindlessIndex;
 };

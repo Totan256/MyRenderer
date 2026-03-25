@@ -5,20 +5,22 @@
 #include "VulkanSync.hpp"
 #include "RHIcommon.hpp"
 #include <map>
+#include <deque>
 
 class VulkanRenderGraph : public RenderGraph {
 public:
     struct PassNode {
         std::string name;
-        std::vector<VulkanImage*> resources;
+        std::vector<rhi::Resource*> resources;
         std::vector<rhi::ResourceRequirement> requirements;
         // compile() で計算されたバリアを保持
         std::vector<VkImageMemoryBarrier2> imageBarriers;
+        std::vector<VkBufferMemoryBarrier2> bufferBarriers;
         // 実行すべきコマンド（ラムダ等で保存）
         std::vector<std::function<void(VulkanCommandList&)>> commands;
     };
 
-    PassBuilder& addPass(const PassTemplate& proto, const std::vector<VulkanImage*>& resources) override;
+    PassBuilder& addPass(const PassTemplate& proto, const std::vector<rhi::Resource*>& resources) override;
 
     // バリア決定アルゴリズム
     void compile() override;
@@ -26,7 +28,8 @@ public:
     void execute(VulkanCommandList& cmd) override;
 
 private:
-    std::vector<PassNode> m_nodes;
+    std::deque<PassNode> m_nodes; 
+    std::vector<std::unique_ptr<PassBuilder>> m_builders;
     std::vector<VulkanCommandList> m_commandLists;
 };
     

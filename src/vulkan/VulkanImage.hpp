@@ -4,10 +4,10 @@
 #include "VulkanDevice.hpp"
 #include "VulkanCommandList.hpp"
 
-class VulkanImage{
+class VulkanImage : public rhi::Resource {
 public:
     VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height);
-    ~VulkanImage();
+    ~VulkanImage() override;
     // コピー禁止
     VulkanImage(const VulkanImage&) = delete;
     VulkanImage& operator=(const VulkanImage&) = delete;
@@ -21,14 +21,14 @@ public:
     VkImageView getView() const {return m_view;}
     uint32_t getBindlessIndex() const { return m_bindlessIndex; }
 
-    rhi::ResourceUsage getCurrentUsage() const { return m_usage; }
-    rhi::ShaderStage   getCurrentStage() const { return m_stage; }
+    rhi::ResourceUsage getCurrentUsage() const override { return m_usage; }
+    rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
     
-    void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) {
+    void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) override {
         m_usage = usage;
         m_stage = stage;
     }
-    
+    bool isImage() const override { return true; }
 private:
     VulkanDevice& m_device;
     VkImage m_image = VK_NULL_HANDLE;
