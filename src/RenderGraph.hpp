@@ -3,6 +3,7 @@
 #include <vector>
 #include <functional>
 #include "RHIcommon.hpp"
+#include "RHIForward.hpp"
 
 
 // パスの「設計図」。スロットごとの要求を定義

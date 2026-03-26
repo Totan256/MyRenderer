@@ -1,8 +1,10 @@
 ﻿#include "Renderer.hpp"
 #include "ImageExporter.hpp"
-#include "rhi/RHI.hpp"
 #include <glm/glm.hpp>
 #include <iostream>
+#include "RHIForward.hpp"
+
+
 struct SceneData {
     glm::vec4 resolution; // width, height, 0, 0
     glm::vec4 params;     // time, frame, 0, 0

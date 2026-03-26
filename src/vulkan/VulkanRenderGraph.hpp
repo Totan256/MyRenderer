@@ -4,6 +4,7 @@
 #include "VulkanBuffer.hpp"
 #include "VulkanSync.hpp"
 #include "RHIcommon.hpp"
+#include "RHIForward.hpp"
 #include <map>
 #include <deque>
 

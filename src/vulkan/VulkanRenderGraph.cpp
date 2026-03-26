@@ -1,4 +1,6 @@
 ﻿#include "VulkanRenderGraph.hpp"
+#include "RHIcommon.hpp"
+#include "RHIForward.hpp"
 
 class VulkanPassBuilder : public PassBuilder {
 public:
