@@ -16,63 +16,63 @@ struct PushConstants {
 };
 
 void Renderer::render(float time) {
-    rhi::ComputePipeline pipeline(m_device, "shaders/test.comp", 16);
-    // 1. 出力用Image
-    rhi::Image outputImage(m_device, m_width, m_height);
+    // rhi::ComputePipeline pipeline(m_device, "shaders/test.comp", 16);
+    // // 1. 出力用Image
+    // rhi::Image outputImage(m_device, m_width, m_height);
 
-    // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
-    VkDeviceSize imageSize = m_width * m_height * 4;
-    rhi::Buffer m_stagingBuffer(m_device, m_device.getAllocator(), imageSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // TRANSFER_DSTを追加
-        VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-    // 3. Uniform Buffer (SceneData)
-    rhi::Buffer sceneBuffer(m_device, m_device.getAllocator(), sizeof(SceneData),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // 修正
-        VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    // // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
+    // VkDeviceSize imageSize = m_width * m_height * 4;
+    // rhi::Buffer m_stagingBuffer(m_device, m_device.getAllocator(), imageSize,
+    //     VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // TRANSFER_DSTを追加
+    //     VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    // // 3. Uniform Buffer (SceneData)
+    // rhi::Buffer sceneBuffer(m_device, m_device.getAllocator(), sizeof(SceneData),
+    //     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // 修正
+    //     VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
-    // シーン情報の更新
-    SceneData scene{};
-    scene.resolution = glm::vec4(m_width, m_height, 0, 0);
-    scene.params = glm::vec4(time, 0, 0, 0);
-    sceneBuffer.writeData(&scene, sizeof(SceneData));
+    // // シーン情報の更新
+    // SceneData scene{};
+    // scene.resolution = glm::vec4(m_width, m_height, 0, 0);
+    // scene.params = glm::vec4(time, 0, 0, 0);
+    // sceneBuffer.writeData(&scene, sizeof(SceneData));
 
-    rhi::CommandList cmd(m_device);
-    cmd.begin();
+    // rhi::CommandList cmd(m_device);
+    // cmd.begin();
 
-    // 1. Layout遷移:General
-    outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL);
+    // // 1. Layout遷移:General
+    // outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL);
 
-    // 2. Dispatch
-    cmd.bindPipeline(pipeline);
-    cmd.bindGlobalDescriptorSet();
-    // インデックスだけをシェーダに渡す
-    cmd.setPushResource(0, outputImage);
-    cmd.setPushResource(4, sceneBuffer);
-    cmd.setPushData(8, sizeof(m_width), &m_width);
-    cmd.setPushData(12, sizeof(m_height), &m_height);
+    // // 2. Dispatch
+    // cmd.bindPipeline(pipeline);
+    // cmd.bindGlobalDescriptorSet();
+    // // インデックスだけをシェーダに渡す
+    // cmd.setPushResource(0, outputImage);
+    // cmd.setPushResource(4, sceneBuffer);
+    // cmd.setPushData(8, sizeof(m_width), &m_width);
+    // cmd.setPushData(12, sizeof(m_height), &m_height);
 
 
-    cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
+    // cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
 
-    // Layout遷移General->Transfer
-    outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    // // Layout遷移General->Transfer
+    // outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-    // Image -> Buffer コピー
-    outputImage.copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer.getNativeBuffer());
+    // // Image -> Buffer コピー
+    // outputImage.copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer.getNativeBuffer());
 
-    cmd.end();
-    cmd.submitAndWait();
+    // cmd.end();
+    // cmd.submitAndWait();
 
-    saveResult("output.png", m_stagingBuffer);
+    // saveResult("output.png", m_stagingBuffer);
 }
 
-void Renderer::saveResult(const std::string& filename, rhi::Buffer& stagingBuffer) {
-    // GPUの書き込みをCPUから見えるように
-    vmaInvalidateAllocation(m_device.getAllocator(), stagingBuffer.getAllocation(), 0, VK_WHOLE_SIZE);
+// void Renderer::saveResult(const std::string& filename, rhi::Buffer& stagingBuffer) {
+    // // GPUの書き込みをCPUから見えるように
+    // vmaInvalidateAllocation(m_device.getAllocator(), stagingBuffer.getAllocation(), 0, VK_WHOLE_SIZE);
     
-    void* data = stagingBuffer.map();
-    ImageExporter::savePngUint8(filename, m_width, m_height, data);
-    stagingBuffer.unmap();
+    // void* data = stagingBuffer.map();
+    // ImageExporter::savePngUint8(filename, m_width, m_height, data);
+    // stagingBuffer.unmap();
     
-    std::cout << "Render result saved to " << filename << std::endl;
-}
+    // std::cout << "Render result saved to " << filename << std::endl;
+// }

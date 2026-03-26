@@ -2,6 +2,8 @@
 #include "RenderGraph.hpp"
 #include "VulkanImage.hpp"
 #include "VulkanBuffer.hpp"
+#include "vulkan/VulkanCommandList.hpp"
+#include "vulkan/VulkanComputePipeline.hpp"
 #include "VulkanSync.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
@@ -26,7 +28,7 @@ public:
     // バリア決定アルゴリズム
     void compile() override;
 
-    void execute(VulkanCommandList& cmd) override;
+    void execute(rhi::CommandList& cmd) override;
 
 private:
     std::deque<PassNode> m_nodes; 

@@ -1,4 +1,8 @@
 ﻿#include "VulkanRenderGraph.hpp"
+#include "VulkanCommandList.hpp"
+#include "VulkanComputePipeline.hpp"
+#include "VulkanBuffer.hpp"
+#include "VulkanImage.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 
@@ -101,7 +105,7 @@ void VulkanRenderGraph::compile() {
     }
 }
 
-void VulkanRenderGraph::execute(VulkanCommandList& cmd) {
+void VulkanRenderGraph::execute(rhi::CommandList& cmd) {
     for (auto& node : m_nodes) {
         // 1. このパスに必要なバリアを一括で発行
         if (!node.imageBarriers.empty() || !node.bufferBarriers.empty()) {
