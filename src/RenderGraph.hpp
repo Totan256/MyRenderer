@@ -2,10 +2,8 @@
 #include <string>
 #include <vector>
 #include <functional>
-#include "RHI.hpp"
 #include "RHIcommon.hpp"
 
-// class Image; // 前方宣言
 
 // パスの「設計図」。スロットごとの要求を定義
 class PassTemplate {
@@ -36,8 +34,8 @@ public:
     virtual PassBuilder& setPushData(uint32_t offset, uint32_t size, const void* data) = 0;
 
     // Bindless用インデックスのセット
-    virtual PassBuilder& setPushResource(uint32_t offset, const rhi::Buffer& resource) = 0;
     virtual PassBuilder& setPushResource(uint32_t offset, const rhi::Image& resource) = 0;
+    virtual PassBuilder& setPushResource(uint32_t offset, const rhi::Buffer& resource) = 0;
 
     // 計算実行
     virtual PassBuilder& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;

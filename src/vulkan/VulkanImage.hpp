@@ -2,7 +2,7 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include "VulkanDevice.hpp"
-#include "VulkanCommandList.hpp"
+// #include "VulkanCommandList.hpp"
 
 class VulkanImage : public rhi::Resource {
 public:
@@ -12,10 +12,8 @@ public:
     VulkanImage(const VulkanImage&) = delete;
     VulkanImage& operator=(const VulkanImage&) = delete;
 
-    // バリアを張ってレイアウトを変更
-    void transitionLayout(VkCommandBuffer cmd, VkImageLayout newLayout);
     // バッファに変換
-    void copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer);
+    //void copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer);
 
     VkImage getImage() const {return m_image;}
     VkImageView getView() const {return m_view;}

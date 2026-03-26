@@ -4,6 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <cstring> // memcpy
 #include "vulkan/VulkanDevice.hpp"
+#include "RHIcommon.hpp"
 
 class VulkanBuffer : public rhi::Resource {
 public:

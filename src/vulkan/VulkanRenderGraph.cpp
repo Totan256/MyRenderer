@@ -1,10 +1,10 @@
-#include "VulkanRenderGraph.hpp"
+﻿#include "VulkanRenderGraph.hpp"
 
 class VulkanPassBuilder : public PassBuilder {
 public:
     VulkanPassBuilder(VulkanRenderGraph::PassNode& node) : m_node(node) {}
 
-    VulkanPassBuilder& bindPipeline(VulkanComputePipeline& pipeline) {
+    PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) {
         m_node.commands.push_back([&pipeline](VulkanCommandList& cmd) {
             cmd.bindPipeline(pipeline);
             cmd.bindGlobalDescriptorSet();
@@ -12,30 +12,23 @@ public:
         return *this;
     }
 
-    VulkanPassBuilder& setPushData(uint32_t offset, uint32_t size, const void* data) override {
-        // Push Constants のコピーを保持（実行時にデータが消えているのを防ぐため）
-        std::vector<uint8_t> blob((uint8_t*)data, (uint8_t*)data + size);
-        m_node.commands.push_back([offset, size, blob](VulkanCommandList& cmd) {
-            cmd.setPushData(offset, size, blob.data());
+    PassBuilder& setPushResource(uint32_t offset, const rhi::Buffer& resource) override {
+        uint32_t index = static_cast<const VulkanBuffer&>(resource).getBindlessIndex();
+        m_node.commands.push_back([offset, index](VulkanCommandList& cmd) {
+            cmd.setPushData(offset, sizeof(uint32_t), &index);
         });
         return *this;
     }
 
-    VulkanPassBuilder& setPushResource(uint32_t offset, const rhi::Buffer& resource) override {
-        m_node.commands.push_back([offset, &resource](VulkanCommandList& cmd) {
-            cmd.setPushResource(offset, resource);
+    PassBuilder& setPushResource(uint32_t offset, const rhi::Image& resource) override {
+        uint32_t index = static_cast<const VulkanImage&>(resource).getBindlessIndex();
+        m_node.commands.push_back([offset, index](VulkanCommandList& cmd) {
+            cmd.setPushData(offset, sizeof(uint32_t), &index);
         });
         return *this;
     }
 
-    VulkanPassBuilder& setPushResource(uint32_t offset, const rhi::Image& resource) override {
-        m_node.commands.push_back([offset, &resource](VulkanCommandList& cmd) {
-            cmd.setPushResource(offset, resource);
-        });
-        return *this;
-    }
-
-    VulkanPassBuilder& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
+    PassBuilder& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
         // 実行時に呼ばれるコマンドを保存
         m_node.commands.push_back([x, y, z](VulkanCommandList& cmd) {
             cmd.dispatch(x, y, z); //
@@ -95,9 +88,9 @@ void VulkanRenderGraph::compile() {
                     bufBarrier.dstStageMask  = next.stageMask;
                     bufBarrier.dstAccessMask = next.accessMask;
                     // バッファにレイアウトは存在しないため無視
-                    bufBarrier.buffer = static_cast<VulkanBuffer*>(res)->getNativeBuffer();
-                    bufBarrier.offset = 0;
-                    bufBarrier.size   = VK_WHOLE_SIZE; // 全域を対象
+                    bufBarrier.buffer        = static_cast<VulkanBuffer*>(res)->getNativeBuffer();
+                    bufBarrier.offset        = 0;
+                    bufBarrier.size          = VK_WHOLE_SIZE; // 全域を対象
                     node.bufferBarriers.push_back(bufBarrier);
                 }
             }

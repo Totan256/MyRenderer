@@ -4,7 +4,7 @@
 
 VulkanBuffer::VulkanBuffer(VulkanDevice& device, VmaAllocator allocator,
     VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
-    : m_device(device), m_allocator(allocator), m_size(size) {
+    : m_device(device), m_allocator(allocator), m_size(size){
     
     // 1. バッファ作成情報の定義
     VkBufferCreateInfo bufferInfo = {};
