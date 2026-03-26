@@ -5,6 +5,7 @@
 #include "VulkanImage.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
+#include <map>
 
 class VulkanPassBuilder : public PassBuilder {
 public:

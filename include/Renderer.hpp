@@ -2,6 +2,8 @@
 #include "rhi/RHIForward.hpp"
 #include <memory>
 #include <vector>
+#include <string>
+#include <cstdint>
 
 
 
@@ -19,7 +21,7 @@ public:
     void render(float time);
 
     // 結果保存
-    void saveResult(const std::string& filename, rhi::Buffer& stagingBuffer);
+    //void saveResult(const std::string& filename, rhi::Buffer& stagingBuffer);
 
 private:
     rhi::Device& m_device;
