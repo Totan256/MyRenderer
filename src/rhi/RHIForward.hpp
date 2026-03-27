@@ -4,19 +4,21 @@
 
 namespace rhi {
 #if defined(RHI_USE_VULKAN)
-    class VulkanDevice;
-    class VulkanBuffer;
-    class VulkanImage;
-    class VulkanCommandList;
-    class VulkanComputePipeline;
-    class VulkanRenderGraph;
+    namespace vk{
+        class VulkanDevice;
+        class VulkanBuffer;
+        class VulkanImage;
+        class VulkanCommandList;
+        class VulkanComputePipeline;
+        class VulkanRenderGraph;
+    }
 
-    using Device = VulkanDevice;
-    using Buffer = VulkanBuffer;
-    using Image = VulkanImage;
-    using CommandList = VulkanCommandList;
-    using ComputePipeline = VulkanComputePipeline;
-    using RenderGraph = VulkanRenderGraph;
+    using Device = vk::VulkanDevice;
+    using Buffer = vk::VulkanBuffer;
+    using Image = vk::VulkanImage;
+    using CommandList = vk::VulkanCommandList;
+    using ComputePipeline = vk::VulkanComputePipeline;
+    using RenderGraph = vk::VulkanRenderGraph;
 #elif defined(RHI_USE_DX12)
     // DX12用の前方宣言とalias
 #endif
