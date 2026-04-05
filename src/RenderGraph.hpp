@@ -32,7 +32,7 @@ namespace rhi {
         virtual PassBuilder& bindPipeline(ComputePipeline& pipeline) = 0;
 
         // Push Constants のセット (生データ)
-        virtual PassBuilder& setPushData(uint32_t offset, uint32_t size, const void* data) = 0;
+        // virtual PassBuilder& setPushData(uint32_t offset, uint32_t size, const void* data) = 0;
 
         // Bindless用インデックスのセット
         virtual PassBuilder& setPushResource(uint32_t offset, const Image& resource) = 0;

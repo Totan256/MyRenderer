@@ -18,7 +18,7 @@ namespace rhi {
     using Image = vk::VulkanImage;
     using CommandList = vk::VulkanCommandList;
     using ComputePipeline = vk::VulkanComputePipeline;
-    using RenderGraph = vk::VulkanRenderGraph;
+    // using RenderGraph = vk::VulkanRenderGraph;
 #elif defined(RHI_USE_DX12)
     // DX12用の前方宣言とalias
 #endif
