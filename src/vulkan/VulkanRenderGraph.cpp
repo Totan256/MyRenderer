@@ -49,9 +49,40 @@ namespace rhi::vk {
             });
             return *this;
         }
+        
     private:
         LogicalPass& m_node;
     };
+
+    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {
+        ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
+        
+        ResourceRegistration reg{};
+        reg.isImported = true;
+        reg.physicalResource = res; // 外部から渡された実リソース
+        
+        m_resourceRegistry.push_back(reg);
+        return handle;
+    }
+
+    ResourceHandle VulkanRenderGraph::createImage(const ImageDesc& desc) {
+        ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
+        ResourceRegistration reg{};
+        reg.isImported = false;
+        reg.desc = desc;
+        m_resourceRegistry.push_back(reg);
+        return handle;
+    }
+
+    ResourceHandle VulkanRenderGraph::createBuffer(const BufferDesc& desc) {
+        ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
+        
+        ResourceRegistration reg{};
+        reg.isImported = false;
+        reg.desc = desc;
+        m_resourceRegistry.push_back(reg);
+        return handle;
+    }
 
     PassBuilder& VulkanRenderGraph::addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) {
         uint32_t passIndex = static_cast<uint32_t>(m_logicalNodes.size());
@@ -59,17 +90,15 @@ namespace rhi::vk {
         auto& node = m_logicalNodes.back();
 
         node.name = proto.getName();
-        node.resources = resources;
+        node.resourceHandles = resources;
         node.requirements = proto.getRequirements();
 
         for (size_t i = 0; i < resources.size(); ++i) {
             ResourceHandle h = resources[i];
             auto& req = proto.getRequirements()[i]; // ReadかWriteかの情報
-            // 書き込み（StorageWrite, TransferDstなど）なら Producer
             if (isWriteUsage(req.usage)) {
                 m_resourceRegistry[h].producers.push_back(passIndex);
             } else {
-                // 読み込みなら Consumer
                 m_resourceRegistry[h].consumers.push_back(passIndex);
             }
         }
@@ -104,8 +133,8 @@ void VulkanRenderGraph::compile() {
         auto& physiaclNode = m_physiaclNodes[passIdx];
         physiaclNode.imageBarriers.clear();
         physiaclNode.bufferBarriers.clear();
-        for (size_t i = 0; i < logicalNode.resources.size(); ++i) {
-            rhi::ResourceHandle h = logicalNode.resources[i];
+        for (size_t i = 0; i < logicalNode.resourceHandles.size(); ++i) {
+            rhi::ResourceHandle h = logicalNode.resourceHandles[i];
             const auto& req = logicalNode.requirements[i];
             // 要求される次の状態
             VulkanResourceState next = MapResourceState(req.usage, req.stage);

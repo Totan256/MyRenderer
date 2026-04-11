@@ -21,6 +21,9 @@ namespace rhi::vk {
         
 
         PassBuilder& addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) override;
+        ResourceHandle importResource(Resource* res) override;
+        ResourceHandle createImage(const ImageDesc& desc) override;
+        ResourceHandle createBuffer(const BufferDesc& desc) override;
 
         // バリア決定アルゴリズム
         void compile() override;

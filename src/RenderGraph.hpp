@@ -56,13 +56,12 @@ namespace rhi {
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
         bool isImage() const { return std::holds_alternative<ImageDesc>(desc); }
         
-        Resource* importedRes = nullptr; // import用
+        Resource* physicalResource = nullptr; // import用
         bool isImported = false;
         
         // 依存関係解析用
         std::vector<uint32_t> producers; // このリソースに書き込むパスのIndex
         std::vector<uint32_t> consumers; // このリソースを読み込むパスのIndex
-
 
     };
 
@@ -73,7 +72,7 @@ namespace rhi {
 
     struct LogicalPass {
         std::string name;
-        std::vector<ResourceHandle> resources;
+        std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
         // compile() で計算されたバリアを保持
         // std::vector<VkImageMemoryBarrier2> imageBarriers;
