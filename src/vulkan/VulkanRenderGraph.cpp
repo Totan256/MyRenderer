@@ -5,11 +5,18 @@
 #include "VulkanImage.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
+#include "VulkanResourceAllocator.hpp"
 #include <map>
+#include <queue>
+#include <vector>
+#include <set>
+#include <algorithm>
+#include <numeric>
+
 namespace rhi::vk {
     class VulkanPassBuilder : public PassBuilder {
     public:
-        VulkanPassBuilder(VulkanRenderGraph::PassNode& node) : m_node(node) {}
+        VulkanPassBuilder(LogicalPass& node) : m_node(node) {}
 
         PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) {
             m_node.commands.push_back([&pipeline](VulkanCommandList& cmd) {
@@ -43,93 +50,127 @@ namespace rhi::vk {
             return *this;
         }
     private:
-        VulkanRenderGraph::PassNode& m_node;
+        LogicalPass& m_node;
     };
 
-    PassBuilder& VulkanRenderGraph::addPass(const PassTemplate& proto, const std::vector<Resource*>& resources) {
-        m_nodes.emplace_back();
-        auto& node = m_nodes.back();
+    PassBuilder& VulkanRenderGraph::addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) {
+        uint32_t passIndex = static_cast<uint32_t>(m_logicalNodes.size());
+        m_logicalNodes.emplace_back();
+        auto& node = m_logicalNodes.back();
+
         node.name = proto.getName();
         node.resources = resources;
         node.requirements = proto.getRequirements();
+
+        for (size_t i = 0; i < resources.size(); ++i) {
+            ResourceHandle h = resources[i];
+            auto& req = proto.getRequirements()[i]; // ReadかWriteかの情報
+            // 書き込み（StorageWrite, TransferDstなど）なら Producer
+            if (isWriteUsage(req.usage)) {
+                m_resourceRegistry[h].producers.push_back(passIndex);
+            } else {
+                // 読み込みなら Consumer
+                m_resourceRegistry[h].consumers.push_back(passIndex);
+            }
+        }
         
         auto builder = std::make_unique<VulkanPassBuilder>(node);
         m_builders.push_back(std::move(builder));
         return *m_builders.back();
     }
 
-    void VulkanRenderGraph::compile() {
-        // グラフ全体でのリソースの「最新状態」を追跡するためのテンポラリマップ
-        std::map<Resource*, VulkanResourceState> lastStates;
 
-        for (auto& node : m_nodes) {
-            node.imageBarriers.clear();
-            node.bufferBarriers.clear();
-            for (size_t i = 0; i < node.resources.size(); ++i) {
-                Resource* res = node.resources[i];
-                auto& req = node.requirements[i];
 
-                VulkanResourceState prev = lastStates.contains(res) ? 
-                    lastStates[res] : MapResourceState(res->getCurrentUsage(), res->getCurrentStage());
-                VulkanResourceState next = MapResourceState(req.usage, req.stage);
 
-                // 同期が必要かチェック
-                if (prev.layout != next.layout || (prev.accessMask & next.accessMask) != next.accessMask) {
-                    if (res->isImage()) {
-                        // --- Image Barrier ---
-                        VkImageMemoryBarrier2 imgBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-                        imgBarrier.srcStageMask  = prev.stageMask;
-                        imgBarrier.srcAccessMask = prev.accessMask;
-                        imgBarrier.oldLayout     = prev.layout;
-                        imgBarrier.dstStageMask  = next.stageMask;
-                        imgBarrier.dstAccessMask = next.accessMask;
-                        imgBarrier.newLayout     = next.layout;
-                        imgBarrier.image         = static_cast<VulkanImage*>(res)->getImage();
-                        imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-                        node.imageBarriers.push_back(imgBarrier);
-                    } else {
-                        // --- Buffer Barrier ---
-                        VkBufferMemoryBarrier2 bufBarrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
-                        bufBarrier.srcStageMask  = prev.stageMask;
-                        bufBarrier.srcAccessMask = prev.accessMask;
-                        bufBarrier.dstStageMask  = next.stageMask;
-                        bufBarrier.dstAccessMask = next.accessMask;
-                        // バッファにレイアウトは存在しないため無視
-                        bufBarrier.buffer        = static_cast<VulkanBuffer*>(res)->getNativeBuffer();
-                        bufBarrier.offset        = 0;
-                        bufBarrier.size          = VK_WHOLE_SIZE; // 全域を対象
-                        node.bufferBarriers.push_back(bufBarrier);
-                    }
+
+    // src/vulkan/VulkanRenderGraph.cpp
+
+void VulkanRenderGraph::compile() {
+    // 1. 全パスのインデックスリストを作成
+    std::vector<uint32_t> passIndices(m_logicalNodes.size());
+    std::iota(passIndices.begin(), passIndices.end(), 0);
+    // 2. パスソート (以前実装したトポロジカルソート)
+    std::vector<uint32_t> sortedIndices = getSortPasses(passIndices);
+    // 3. ライフタイムの計算
+    calculateLifetimes(sortedIndices);
+    // 4. 物理リソースの割り当て (VulkanResourceAllocatorを使用)
+    m_resourceAllocator.allocate(m_resourceRegistry, m_resourceLifetimes);
+    // 5. バリアとレイアウト遷移の生成
+    // 各リソースの「現在の状態」を追跡するためのマップ
+    std::map<rhi::ResourceHandle, VulkanResourceState> currentStates;
+
+    for (uint32_t passIdx : sortedIndices) {
+        auto& logicalNode = m_logicalNodes[passIdx];
+        auto& physiaclNode = m_physiaclNodes[passIdx];
+        physiaclNode.imageBarriers.clear();
+        physiaclNode.bufferBarriers.clear();
+        for (size_t i = 0; i < logicalNode.resources.size(); ++i) {
+            rhi::ResourceHandle h = logicalNode.resources[i];
+            const auto& req = logicalNode.requirements[i];
+            // 要求される次の状態
+            VulkanResourceState next = MapResourceState(req.usage, req.stage);
+            // 初登場のリソースは Undefined 状態から開始
+            VulkanResourceState prev = currentStates.count(h) ? currentStates[h] : 
+                VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
+            // 同期が必要（レイアウトが違う、または書き込みが含まれる）かチェック
+            if (prev.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
+                if (m_resourceRegistry[h].isImage()) {
+                    VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                    imgBarrier.srcStageMask  = prev.stageMask;
+                    imgBarrier.srcAccessMask = prev.accessMask;
+                    imgBarrier.dstStageMask  = next.stageMask;
+                    imgBarrier.dstAccessMask = next.accessMask;
+                    imgBarrier.oldLayout     = prev.layout;
+                    imgBarrier.newLayout     = next.layout;
+                    imgBarrier.image         = m_resourceAllocator.getPhysicalImage(h)->getImage();
+                    imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                    physiaclNode.imageBarriers.push_back(imgBarrier);
+                } else {
+                    VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                    bufBarrier.srcStageMask  = prev.stageMask;
+                    bufBarrier.srcAccessMask = prev.accessMask;
+                    bufBarrier.dstStageMask  = next.stageMask;
+                    bufBarrier.dstAccessMask = next.accessMask;
+                    bufBarrier.buffer        = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
+                    bufBarrier.offset        = 0;
+                    bufBarrier.size          = VK_WHOLE_SIZE;
+                    physiaclNode.bufferBarriers.push_back(bufBarrier);
                 }
-                lastStates[res] = next;
             }
+            // 状態を更新
+            currentStates[h] = next;
         }
     }
+    // ソートされた順序にノードを並び替える（または実行時に順序を参照する）
+    m_sortedIndices = sortedIndices;
+}
 
     void VulkanRenderGraph::execute(CommandList& cmd) {
-        for (auto& node : m_nodes) {
+        for (size_t i = 0; i < m_logicalNodes.size(); ++i) {
             // 1. このパスに必要なバリアを一括で発行
-            if (!node.imageBarriers.empty() || !node.bufferBarriers.empty()) {
+            auto& logicalNode = m_logicalNodes[i];
+            auto& physiaclNode = m_physiaclNodes[i];
+            if (!physiaclNode.imageBarriers.empty() || !physiaclNode.bufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-                depInfo.imageMemoryBarrierCount = (uint32_t)node.imageBarriers.size();
-                depInfo.pImageMemoryBarriers    = node.imageBarriers.data();
-                depInfo.bufferMemoryBarrierCount = (uint32_t)node.bufferBarriers.size();
-                depInfo.pBufferMemoryBarriers    = node.bufferBarriers.data();
+                depInfo.imageMemoryBarrierCount = (uint32_t)physiaclNode.imageBarriers.size();
+                depInfo.pImageMemoryBarriers    = physiaclNode.imageBarriers.data();
+                depInfo.bufferMemoryBarrierCount = (uint32_t)physiaclNode.bufferBarriers.size();
+                depInfo.pBufferMemoryBarriers    = physiaclNode.bufferBarriers.data();
                 
                 vkCmdPipelineBarrier2(cmd.getCommandBuffer(), &depInfo);
             }
 
             // 2. 実際のコマンドを実行
-            for (auto& command : node.commands) {
+            for (auto& command : logicalNode.commands) {
                 command(cmd);
             }
             
             // 3. 実行後、リソースの実状態を更新（次のフレームやグラフ外での利用のため）
-            for (size_t i = 0; i < node.resources.size(); ++i) {
-                if (auto* res = node.resources[i]) {
-                    res->setState(node.requirements[i].usage, node.requirements[i].stage);
-                }
-            }
+            // for (size_t i = 0; i < logicalNode.resources.size(); ++i) {
+            //     if (auto* res = logicalNode.requirements[i]) {
+            //         res->setState(logicalNode.requirements[i].usage, logicalNode.requirements[i].stage);
+            //     }
+            // }
         }
     }
 }

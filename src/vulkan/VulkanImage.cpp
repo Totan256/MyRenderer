@@ -6,7 +6,10 @@
 #include "VulkanImage.hpp"
 namespace rhi::vk{
     VulkanImage::VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height)
-        : m_device(device), m_width(width), m_height(height) {
+        : m_device(device) {
+
+        m_desc.width = width;
+        m_desc.height = height;
         
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;

@@ -5,8 +5,9 @@ namespace rhi::vk {
     
     VulkanBuffer::VulkanBuffer(VulkanDevice& device, VmaAllocator allocator,
         VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
-        : m_device(device), m_allocator(allocator), m_size(size){
+        : m_device(device), m_allocator(allocator){
         
+        m_desc.size = size;
         // 1. バッファ作成情報の定義
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -49,7 +50,7 @@ namespace rhi::vk {
 
     void VulkanBuffer::writeData(const void* data, size_t dataSize) {
         // サイズチェック
-        if (dataSize > m_size) {
+        if (dataSize > m_desc.size) {
             throw std::runtime_error("Data size is larger than buffer size!");
         }
 

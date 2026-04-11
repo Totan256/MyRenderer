@@ -22,7 +22,7 @@ namespace rhi::vk{
 
         // Vulkanハンドル取得
         VkBuffer getNativeBuffer() const { return m_buffer; }
-        VkDeviceSize getSize() const { return m_size; }
+        VkDeviceSize getSize() const { return m_desc.size; }
         VmaAllocation getAllocation() const { return m_allocation; } 
 
         void* map();
@@ -38,12 +38,13 @@ namespace rhi::vk{
             m_stage = stage;
         }
         bool isImage() const override { return false; }
+        BufferDesc getDesc() const { return m_desc; }
     private:
         VulkanDevice& m_device;
         VmaAllocator m_allocator; // メモリ管理者の参照
         VkBuffer m_buffer = VK_NULL_HANDLE;
         VmaAllocation m_allocation = VK_NULL_HANDLE; // メモリの実体
-        VkDeviceSize m_size;
+        BufferDesc m_desc;
 
         rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;

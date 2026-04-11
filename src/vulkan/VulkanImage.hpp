@@ -29,14 +29,15 @@ namespace rhi::vk{
             m_stage = stage;
         }
         bool isImage() const override { return true; }
+        ImageDesc getDesc(){ return m_desc; }
+        
     private:
         VulkanDevice& m_device;
         VkImage m_image = VK_NULL_HANDLE;
         VkImageView m_view = VK_NULL_HANDLE;
         VmaAllocation m_allocation = VK_NULL_HANDLE;
 
-        uint32_t m_width;
-        uint32_t m_height;
+        ImageDesc m_desc;
         
         rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
