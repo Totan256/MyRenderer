@@ -43,6 +43,9 @@ namespace rhi::vk{
             uint32_t index = resource.getBindlessIndex();
             setPushData(offset, sizeof(uint32_t), &index);
         }
+        void setPushResource(uint32_t offset, uint32_t index) {
+            setPushData(offset, sizeof(uint32_t), &index);
+        }
         void setPushData(uint32_t offset, uint32_t size, const void* data) {
             // 現在のパイプラインの制限をチェック
             if (offset + size > m_pipeline->getPushContentsSize()) {

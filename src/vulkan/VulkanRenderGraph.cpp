@@ -12,11 +12,37 @@
 #include <set>
 #include <algorithm>
 #include <numeric>
+#include <stdexcept>
 
 namespace rhi::vk {
+    class VulkanDispatchObject : public DispatchObject {
+    public:
+        VulkanDispatchObject(LogicalPass::DispatchState& ds) : m_ds(&ds) {}
+        ~VulkanDispatchObject(){}
+        DispatchObject& updateConstantRaw(uint32_t slot, const void* data, size_t size) override{
+            uint32_t offset = slot * 4;
+            std::memcpy(m_ds->pushData.data() + offset, data, size);
+            m_ds->pushDataSize = std::max(m_ds->pushDataSize, static_cast<uint32_t>(offset + size));
+            return *this;
+        }
+        DispatchObject& updateResource(uint32_t slot, ResourceHandle handle) override{
+            m_ds->slotValues.at(slot) = handle;
+            return *this;
+        }
+        DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) override {
+            m_ds->x = x;
+            m_ds->y = y;
+            m_ds->z = z;
+            return *this;
+        }
+        LogicalPass::DispatchState* m_ds;
+    };
+
+
     class VulkanPassBuilder : public PassBuilder {
     public:
-        VulkanPassBuilder(LogicalPass& node) : m_node(node) {}
+        VulkanPassBuilder(VulkanRenderGraph& graph, LogicalPass& node) 
+        : m_graph(graph), m_node(node) {}
 
         PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) {
             m_node.commands.push_back([&pipeline](VulkanCommandList& cmd) {
@@ -26,34 +52,60 @@ namespace rhi::vk {
             return *this;
         }
 
-        PassBuilder& setPushResource(uint32_t offset, const Buffer& resource) override {
-            uint32_t index = static_cast<const VulkanBuffer&>(resource).getBindlessIndex();
-            m_node.commands.push_back([offset, index](VulkanCommandList& cmd) {
-                cmd.setPushData(offset, sizeof(uint32_t), &index);
-            });
+        PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) override {
+            uint32_t offset = slot * 4;
+            if (offset + size > MAX_PUSH_CONSTANT_SIZE) {
+                throw std::runtime_error("Push constants limit exceeded!");
+            }
+            // データを直接コピー
+            std::memcpy(m_node.pushData.data() + offset, data, size);
+            // 使用サイズを更新
+            m_node.pushDataSize = std::max(m_node.pushDataSize, static_cast<uint32_t>(offset + size));
             return *this;
         }
 
-        PassBuilder& setPushResource(uint32_t offset, const Image& resource) override {
-            uint32_t index = static_cast<const VulkanImage&>(resource).getBindlessIndex();
-            m_node.commands.push_back([offset, index](VulkanCommandList& cmd) {
-                cmd.setPushData(offset, sizeof(uint32_t), &index);
-            });
+        PassBuilder& setResource(uint32_t slot, ResourceHandle handle) override {
+            m_node.slotValues[slot] = handle;
             return *this;
         }
 
-        PassBuilder& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
-            // 実行時に呼ばれるコマンドを保存
-            m_node.commands.push_back([x, y, z](VulkanCommandList& cmd) {
-                cmd.dispatch(x, y, z); //
+        VulkanDispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
+            uint32_t id = m_node.nextDispatchId++;
+            // 1. 現在の builder/node の状態をスナップショットとして保存 (Capture by Value)
+            LogicalPass::DispatchState& ds = m_node.dispatchStates[id];
+            ds.x = x; ds.y = y; ds.z = z;
+            ds.pushData = m_node.pushData;         // 配列のコピー
+            ds.pushDataSize = m_node.pushDataSize;
+            ds.slotValues = m_node.slotValues;     // Mapのコピー
+            m_dispatchObjects.emplace_back(ds);
+            // 2. 実行コマンドを登録。ラムダには ID のみをキャプチャさせる
+            m_node.commands.push_back([&node = m_node, &graph = m_graph, id](VulkanCommandList& cmd) {
+                // 実行時に最新のスナップショットを取得
+                auto& state = node.dispatchStates.at(id);
+                for (auto const& [slot, handle] : state.slotValues) {
+                    uint32_t bindlessIndex = graph.getPhysicalIndex(handle);
+                    uint32_t offset = slot * 4;
+                    if (offset + 4 <= MAX_PUSH_CONSTANT_SIZE) {
+                        std::memcpy(state.pushData.data() + offset, &bindlessIndex, 4);
+                        state.pushDataSize = std::max(state.pushDataSize, offset + 4);
+                    }
+                }
+                // この dispatch 専用のプッシュ定数を送信
+                if (state.pushDataSize > 0) {
+                    cmd.setPushData(0, state.pushDataSize, state.pushData.data());
+                }
+                cmd.dispatch(state.x, state.y, state.z);
             });
-            return *this;
+            return m_dispatchObjects.back();
         }
         
     private:
+        VulkanRenderGraph& m_graph;
         LogicalPass& m_node;
+        std::deque<VulkanDispatchObject> m_dispatchObjects;
     };
 
+    
     ResourceHandle VulkanRenderGraph::importResource(Resource* res) {
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
         
@@ -84,6 +136,24 @@ namespace rhi::vk {
         return handle;
     }
 
+    uint32_t VulkanRenderGraph::getPhysicalIndex(ResourceHandle handle) {
+        // 1. ハンドルが有効かチェック
+        if (handle == InvalidResource || handle >= m_resourceRegistry.size()) {
+            return 0; // またはエラーを示す値
+        }
+        // 2. リソースレジストリからリソースの種類（Image or Buffer）を確認
+        const auto& reg = m_resourceRegistry[handle];
+        bool isImg = reg.isImported ? reg.physicalResource->isImage() : reg.isImage();
+        // 3. Allocator から物理リソースへのポインタを取得し、BindlessIndex を返す
+        if (isImg) {
+            VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(handle);
+            return physImg ? physImg->getBindlessIndex() : 0; //
+        } else {
+            VulkanBuffer* physBuf = m_resourceAllocator.getPhysicalBuffer(handle);
+            return physBuf ? physBuf->getBindlessIndex() : 0; //
+        }
+    }
+
     PassBuilder& VulkanRenderGraph::addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) {
         uint32_t passIndex = static_cast<uint32_t>(m_logicalNodes.size());
         m_logicalNodes.emplace_back();
@@ -103,7 +173,7 @@ namespace rhi::vk {
             }
         }
         
-        auto builder = std::make_unique<VulkanPassBuilder>(node);
+        auto builder = std::make_unique<VulkanPassBuilder>(*this, node);
         m_builders.push_back(std::move(builder));
         return *m_builders.back();
     }
@@ -177,8 +247,8 @@ void VulkanRenderGraph::compile() {
     void VulkanRenderGraph::execute(CommandList& cmd) {
         for (size_t i = 0; i < m_logicalNodes.size(); ++i) {
             // 1. このパスに必要なバリアを一括で発行
-            auto& logicalNode = m_logicalNodes[i];
-            auto& physiaclNode = m_physiaclNodes[i];
+            auto& logicalNode = m_logicalNodes[m_sortedIndices[i]];
+            auto& physiaclNode = m_physiaclNodes[m_sortedIndices[i]];
             if (!physiaclNode.imageBarriers.empty() || !physiaclNode.bufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
                 depInfo.imageMemoryBarrierCount = (uint32_t)physiaclNode.imageBarriers.size();
@@ -202,4 +272,6 @@ void VulkanRenderGraph::compile() {
             // }
         }
     }
+
+
 }

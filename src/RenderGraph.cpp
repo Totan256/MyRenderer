@@ -85,7 +85,7 @@ namespace rhi{
     }
 
     void RenderGraph::calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices) {
-        if (!sortedPassIndices.empty()) return;
+        if (sortedPassIndices.empty()) return;
         // 1. 全リソースのライフタイムを初期化
         // m_resourceRegistry のサイズ分だけライフタイム情報を確保
         m_resourceLifetimes.assign(m_resourceRegistry.size(), {0xFFFFFFFF, 0});
@@ -94,7 +94,7 @@ namespace rhi{
             uint32_t passIdx = sortedPassIndices[executionIndex];
             const auto& node = m_logicalNodes[passIdx];
             // パスが使用する全リソースハンドルをチェック
-            for (rhi::ResourceHandle h : node.resources) {
+            for (rhi::ResourceHandle h : node.resourceHandles) {
                 auto& lifetime = m_resourceLifetimes[h];
                 // 最初に使われたタイミングを記録
                 if (lifetime.firstPass == 0xFFFFFFFF) {

@@ -1,14 +1,32 @@
 ﻿#pragma once
 #include <string>
 #include <vector>
+#include <array>
 #include <deque>
 #include <functional>
 #include <variant>
+#include <map>
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 
 namespace rhi {
-    // パスの「設計図」。スロットごとの要求を定義
+    using ResourceHandle = uint32_t;
+    const ResourceHandle InvalidResource = 0xFFFFFFFF;
+    
+    class DispatchObject {
+    public:
+        virtual ~DispatchObject() = default;
+        virtual DispatchObject& updateConstantRaw(uint32_t slot, const void* data, size_t size) = 0;
+        virtual DispatchObject& updateResource(uint32_t slot, ResourceHandle handle) = 0;
+        virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
+        // テンプレートでのヘルパー
+        template<typename T>
+        DispatchObject& set(uint32_t slot, const T& value) {
+            updateConstant(slot, &value, sizeof(T));
+            return *this;
+        }
+    };
+    
     class PassTemplate {
     public:
         PassTemplate(const std::string& name) : m_name(name) {}
@@ -29,24 +47,23 @@ namespace rhi {
     class PassBuilder {
     public:
         virtual ~PassBuilder() = default;
-
         // パイプラインのセット
         virtual PassBuilder& bindPipeline(ComputePipeline& pipeline) = 0;
-
-        // Push Constants のセット (生データ)
-        // virtual PassBuilder& setPushData(uint32_t offset, uint32_t size, const void* data) = 0;
-
+        // Push Constants のセット
+        template<typename T>
+        PassBuilder& setConstant(uint32_t slot, const T& data) {
+            return setConstantRaw(slot, &data, sizeof(T));
+        }
         // Bindless用インデックスのセット
-        virtual PassBuilder& setPushResource(uint32_t offset, const Image& resource) = 0;
-        virtual PassBuilder& setPushResource(uint32_t offset, const Buffer& resource) = 0;
-
+        virtual PassBuilder& setResource(uint32_t slot, rhi::ResourceHandle handle) = 0;
         // 計算実行
-        virtual PassBuilder& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
+        virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
+
+    protected:
+        virtual PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) = 0;
     };// Todo addPass->addPassができないようにしとく
 
 
-    using ResourceHandle = uint32_t;
-    const ResourceHandle InvalidResource = 0xFFFFFFFF;
 
     // リソースの設計図（仮想リソース作成用）
     
@@ -72,12 +89,27 @@ namespace rhi {
 
     struct LogicalPass {
         std::string name;
+        // struct ResourceBinding {
+        //     ResourceHandle handle;
+        //     uint32_t offset;
+        // };
+        // std::vector<ResourceBinding> resourceBindings;
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
-        // compile() で計算されたバリアを保持
-        // std::vector<VkImageMemoryBarrier2> imageBarriers;
-        // std::vector<VkBufferMemoryBarrier2> bufferBarriers;
-        // // 実行すべきコマンド（ラムダ等で保存）
+
+        std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
+        uint32_t pushDataSize = 0;
+        std::map<uint32_t, ResourceHandle> slotValues;
+        
+        struct DispatchState {
+            std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
+            uint32_t pushDataSize = 0;
+            std::map<uint32_t, ResourceHandle> slotValues;
+            uint32_t x, y, z;
+        };
+        uint32_t nextDispatchId = 0;
+        std::map<uint32_t, DispatchState> dispatchStates;
+
         std::vector<std::function<void(CommandList&)>> commands;
     };
 
@@ -102,6 +134,7 @@ namespace rhi {
         // 実際のコマンド発行
         virtual void execute(CommandList& cmd) = 0;
 
+        virtual uint32_t getPhysicalIndex(ResourceHandle handle) = 0;
     private:
     protected:
         bool isWriteUsage(rhi::ResourceUsage usage);

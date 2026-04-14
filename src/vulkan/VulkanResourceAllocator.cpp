@@ -1,4 +1,4 @@
-#include "VulkanResourceAllocator.hpp"
+﻿#include "VulkanResourceAllocator.hpp"
 #include "VulkanImage.hpp"
 #include "VulkanBuffer.hpp"
 #include <algorithm>
@@ -28,10 +28,10 @@ namespace rhi::vk{
             const auto& life = lifetimes[h];
 
             if (reg.isImported) {
-                if (reg.importedRes->isImage()) {
-                    m_imageMap[h] = static_cast<VulkanImage*>(reg.importedRes);
+                if (reg.physicalResource->isImage()) {
+                    m_imageMap[h] = static_cast<VulkanImage*>(reg.physicalResource);
                 } else {
-                    m_bufferMap[h] = static_cast<VulkanBuffer*>(reg.importedRes);
+                    m_bufferMap[h] = static_cast<VulkanBuffer*>(reg.physicalResource);
                 }
                 continue;
             }

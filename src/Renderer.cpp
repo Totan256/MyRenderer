@@ -2,6 +2,7 @@
 #include "ImageExporter.hpp"
 #include <glm/glm.hpp>
 #include <iostream>
+#include <cstdint>
 #include "RHIForward.hpp"
 
 

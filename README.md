@@ -78,3 +78,32 @@ cmake --build .
 DirectX12の部分実装
 フェーズ4
 とりあえず試しにWorkGraphやってみたい
+
+## 利用イメージ
+``` c++
+// --- [Build Phase] グラフの構造を定義 (初期化時) ---
+auto hOutput = graph.createImage(outputDesc);
+auto hScene  = graph.importResource(sceneBuffer);
+
+// パスとスロットの定義
+auto& mainPass = graph.addPass("MainCompute", "shaders/test.comp")
+    .addSlot(0, ResourceUsage::StorageWrite) // スロット0: 出力画像
+    .addSlot(1, ResourceUsage::StorageRead)  // スロット1: シーンデータ
+    .addSlot(2, ResourceUsage::Constant);     // スロット2: カメラ等の定数
+
+// リソースのバインドと実行設定の記録
+mainPass.setResource(0, hOutput)
+        .setResource(1, hScene)
+        .dispatch(width / 16, height / 16, 1);
+
+graph.compile(); // バリアとリソースエイリアシングを静的に確定
+
+// --- [Runtime Phase] 毎フレームの実行ループ ---
+while (running) {
+    // 実行前に動的なパラメータ（カメラ位置など）だけを更新
+    mainPass.setConstant(2, currentCameraData);
+
+    // 構築済みの構造に従って実行。ハッシュに変更がなければ再コンパイル不要
+    graph.execute(cmdList);
+}
+```
