@@ -200,7 +200,7 @@ void VulkanRenderGraph::compile() {
 
     for (uint32_t passIdx : sortedIndices) {
         auto& logicalNode = m_logicalNodes[passIdx];
-        auto& physiaclNode = m_physiaclNodes[passIdx];
+        auto& physiaclNode = m_physicalNodes[passIdx];
         physiaclNode.imageBarriers.clear();
         physiaclNode.bufferBarriers.clear();
         for (size_t i = 0; i < logicalNode.resourceHandles.size(); ++i) {
@@ -248,7 +248,7 @@ void VulkanRenderGraph::compile() {
         for (size_t i = 0; i < m_logicalNodes.size(); ++i) {
             // 1. このパスに必要なバリアを一括で発行
             auto& logicalNode = m_logicalNodes[m_sortedIndices[i]];
-            auto& physiaclNode = m_physiaclNodes[m_sortedIndices[i]];
+            auto& physiaclNode = m_physicalNodes[m_sortedIndices[i]];
             if (!physiaclNode.imageBarriers.empty() || !physiaclNode.bufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
                 depInfo.imageMemoryBarrierCount = (uint32_t)physiaclNode.imageBarriers.size();

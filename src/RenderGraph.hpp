@@ -21,8 +21,8 @@ namespace rhi {
         virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
         // テンプレートでのヘルパー
         template<typename T>
-        DispatchObject& set(uint32_t slot, const T& value) {
-            updateConstant(slot, &value, sizeof(T));
+        DispatchObject& updateConstant(uint32_t slot, const T& value) {
+            updateConstantRaw(slot, &value, sizeof(T));
             return *this;
         }
     };

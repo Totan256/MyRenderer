@@ -35,7 +35,7 @@ namespace rhi::vk {
         
         std::vector<std::unique_ptr<PassBuilder>> m_builders;
         std::vector<VulkanCommandList> m_commandLists;
-        std::vector<PhysicalNode> m_physiaclNodes;
+        std::vector<PhysicalNode> m_physicalNodes;
 
         VulkanResourceAllocator m_resourceAllocator;
 
