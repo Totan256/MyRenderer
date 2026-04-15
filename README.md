@@ -92,16 +92,16 @@ auto& mainPass = graph.addPass("MainCompute", "shaders/test.comp")
     .addSlot(2, ResourceUsage::Constant);     // スロット2: カメラ等の定数
 
 // リソースのバインドと実行設定の記録
-mainPass.setResource(0, hOutput)
-        .setResource(1, hScene)
-        .dispatch(width / 16, height / 16, 1);
+auto& dsp = mainPass.dispatch(width / 16, height / 16, 1)
+                    .setResource(0, hOutput)
+                    .setResource(1, hScene);
 
 graph.compile(); // バリアとリソースエイリアシングを静的に確定
 
 // --- [Runtime Phase] 毎フレームの実行ループ ---
 while (running) {
     // 実行前に動的なパラメータ（カメラ位置など）だけを更新
-    mainPass.setConstant(2, currentCameraData);
+    dsp.updateConstant(2, currentCameraData);
 
     // 構築済みの構造に従って実行。ハッシュに変更がなければ再コンパイル不要
     graph.execute(cmdList);

@@ -171,20 +171,17 @@ namespace rhi::vk {
             } else {
                 m_resourceRegistry[h].consumers.push_back(passIndex);
             }
+            node.slotValues[proto.getRequirements()[i].slotIndex] = h;
         }
         
         auto builder = std::make_unique<VulkanPassBuilder>(*this, node);
         m_builders.push_back(std::move(builder));
         return *m_builders.back();
     }
-
-
-
-
-
     // src/vulkan/VulkanRenderGraph.cpp
 
 void VulkanRenderGraph::compile() {
+    m_physicalNodes.resize(m_logicalNodes.size());
     // 1. 全パスのインデックスリストを作成
     std::vector<uint32_t> passIndices(m_logicalNodes.size());
     std::iota(passIndices.begin(), passIndices.end(), 0);
