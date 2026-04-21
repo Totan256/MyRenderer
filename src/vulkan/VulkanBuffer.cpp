@@ -9,8 +9,8 @@ namespace rhi::vk {
         
         // UBOの場合はアライメントサイズに切り上げ
         if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
-            uint32_t alignment = m_device.getMinUniformBufferOffsetAlignment();
-            m_desc.size = (size + alignment - 1) & ~(alignment - 1);
+            VkDeviceSize align = m_device.getMinUniformBufferOffsetAlignment();
+            m_desc.size = (size + align - 1) & ~(align - 1);
         } else {
             m_desc.size = size;
         }
