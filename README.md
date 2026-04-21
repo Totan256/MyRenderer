@@ -85,23 +85,31 @@ DirectX12の部分実装
 auto hOutput = graph.createImage(outputDesc);
 auto hScene  = graph.importResource(sceneBuffer);
 
+auto& property = graph.createBindGroup({
+    {0, ResourceUsage::StorageWrite}, // スロット0: 出力画像
+    {4, ResourceUsage::StorageRead}  // スロット1: シーンデータ
+});
+
 // パスとスロットの定義
 auto& mainPass = graph.addPass("MainCompute", "shaders/test.comp")
-    .addSlot(0, ResourceUsage::StorageWrite) // スロット0: 出力画像
-    .addSlot(1, ResourceUsage::StorageRead)  // スロット1: シーンデータ
-    .addSlot(2, ResourceUsage::Constant);     // スロット2: カメラ等の定数
+    .bind(propaty)
+    .bind(8, ResourceUsage::Constant);     // スロット2: カメラ等の定数
 
-// リソースのバインドと実行設定の記録
+// リソースのバインドと実行設定の記録(dispatchの順番がそのまま実行順になる)
 auto& dsp = mainPass.dispatch(width / 16, height / 16, 1)
                     .setResource(0, hOutput)
-                    .setResource(1, hScene);
+                    .setResource(4, hScene);
+auto& dsp2 = mainPass.dispatch(width / 16, height / 16, 1)
+                    .setResource(0, hOutput)
+                    .setResource(4, hScene)
+                    .setUniform(8, currentCameraData);
 
 graph.compile(); // バリアとリソースエイリアシングを静的に確定
 
 // --- [Runtime Phase] 毎フレームの実行ループ ---
 while (running) {
     // 実行前に動的なパラメータ（カメラ位置など）だけを更新
-    dsp.updateConstant(2, currentCameraData);
+    dsp.setUniform(8, currentCameraData);
 
     // 構築済みの構造に従って実行。ハッシュに変更がなければ再コンパイル不要
     graph.execute(cmdList);

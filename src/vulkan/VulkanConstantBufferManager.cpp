@@ -38,6 +38,7 @@ namespace rhi::vk {
         }
 
         std::memcpy(frame.mappedPtr + alignedOffset, data, size);
+        vmaFlushAllocation(m_device.getAllocator(), frame.buffer->getAllocation(), alignedOffset, size);
         frame.currentOffset = alignedOffset + size;
 
         return { frame.buffer->getBindlessIndex(), alignedOffset };

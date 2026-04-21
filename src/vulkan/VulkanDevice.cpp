@@ -127,12 +127,18 @@ namespace rhi::vk{
         queueCreateInfo.queueCount = 1; // キューを1つ作成
         queueCreateInfo.pQueuePriorities = &queuePriority;
 
+        // Synchronization2 機能を有効化
+        VkPhysicalDeviceSynchronization2Features sync2Features{};
+        sync2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+        sync2Features.synchronization2 = VK_TRUE;
+
         // 7. 有効化するデバイス機能
         VkPhysicalDeviceFeatures deviceFeatures{};
         // Descriptor Indexing Feature を有効化
         VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
         indexingFeatures.sType =
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        indexingFeatures.pNext = &sync2Features;
         indexingFeatures.runtimeDescriptorArray = VK_TRUE;
         indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
         indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
@@ -151,9 +157,12 @@ namespace rhi::vk{
         createInfo.queueCreateInfoCount = 1;
         createInfo.pEnabledFeatures = &deviceFeatures;
         
-        // ToDo: 有効化するデバイス拡張機能，あとで付け加えやすく
-        createInfo.enabledExtensionCount = 0;
-        createInfo.ppEnabledExtensionNames = nullptr;
+        // ToDo: 有効化するデバイス拡張機能
+        const std::vector<const char*> deviceExtensions = {
+            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+        };
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
         // 9. 論理デバイスの作成
         std::cout << "Creating Logical Device..." << std::endl;

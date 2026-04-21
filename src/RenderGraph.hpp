@@ -16,13 +16,13 @@ namespace rhi {
     class DispatchObject {
     public:
         virtual ~DispatchObject() = default;
-        virtual DispatchObject& updateConstantRaw(uint32_t slot, const void* data, size_t size) = 0;
-        virtual DispatchObject& updateResource(uint32_t slot, ResourceHandle handle) = 0;
+        virtual DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
+        virtual DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) = 0;
         virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
         // テンプレートでのヘルパー
         template<typename T>
-        DispatchObject& updateConstant(uint32_t slot, const T& value) {
-            updateConstantRaw(slot, &value, sizeof(T));
+        DispatchObject& updateConstant(uint32_t offset, const T& value) {
+            updateConstantRaw(offset, &value, sizeof(T));
             return *this;
         }
     };
@@ -51,24 +51,24 @@ namespace rhi {
         virtual PassBuilder& bindPipeline(ComputePipeline& pipeline) = 0;
         // Push Constants のセット
         template<typename T>
-        PassBuilder& setConstant(uint32_t slot, const T& data) {
-            return setConstantRaw(slot, &data, sizeof(T));
+        PassBuilder& setConstant(uint32_t offset, const T& data) {
+            return setConstantRaw(offset, &data, sizeof(T));
         }
         // UBOセット
         template<typename T>
-        PassBuilder& setUniform(uint32_t slot, const T& data) {
+        PassBuilder& setUniform(uint32_t offset, const T& data) {
             static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
-            return setUniformRaw(slot, &data, sizeof(T));
+            return setUniformRaw(offset, &data, sizeof(T));
         }
         // Bindless用インデックスのセット
-        virtual PassBuilder& setResource(uint32_t slot, rhi::ResourceHandle handle) = 0;
-        virtual PassBuilder& setStaticUniform(uint32_t slot, rhi::ResourceHandle handle) = 0;
+        virtual PassBuilder& setResource(uint32_t offset, rhi::ResourceHandle handle) = 0;
+        virtual PassBuilder& setStaticUniform(uint32_t offset, rhi::ResourceHandle handle) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
 
     protected:
-        virtual PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) = 0;
-        virtual PassBuilder& setUniformRaw(uint32_t slot, const void* data, size_t size) = 0;
+        virtual PassBuilder& setConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
+        virtual PassBuilder& setUniformRaw(uint32_t offset, const void* data, size_t size) = 0;
     };// Todo addPass->addPassができないようにしとく
 
     struct ResourceRegistration {
@@ -96,12 +96,12 @@ namespace rhi {
 
         std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
         uint32_t pushDataSize = 0;
-        std::map<uint32_t, ResourceHandle> slotValues;
+        std::map<uint32_t, ResourceHandle> resourceOffsets;
         
         struct DispatchState {
             std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
             uint32_t pushDataSize = 0;
-            std::map<uint32_t, ResourceHandle> slotValues;
+            std::map<uint32_t, ResourceHandle> resourceOffsets;
             uint32_t x, y, z;
         };
         uint32_t nextDispatchId = 0;

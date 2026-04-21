@@ -7,11 +7,17 @@ namespace rhi::vk {
         VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
         : m_device(device), m_allocator(allocator){
         
-        m_desc.size = size;
+        // UBOの場合はアライメントサイズに切り上げ
+        if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
+            uint32_t alignment = m_device.getMinUniformBufferOffsetAlignment();
+            m_desc.size = (size + alignment - 1) & ~(alignment - 1);
+        } else {
+            m_desc.size = size;
+        }
         // 1. バッファ作成情報の定義
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = size;
+        bufferInfo.size = m_desc.size;
         bufferInfo.usage = bufferUsage;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -41,9 +47,9 @@ namespace rhi::vk {
         }
 
         if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
-            m_bindlessIndex = device.registerUniformBuffer(m_buffer, size);
+            m_bindlessIndex = device.registerUniformBuffer(m_buffer, m_desc.size);
         } else {
-            m_bindlessIndex = device.registerBuffer(m_buffer, size);
+            m_bindlessIndex = device.registerBuffer(m_buffer,  m_desc.size);
         }
     }
 

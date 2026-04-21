@@ -20,14 +20,13 @@ namespace rhi::vk {
     public:
         VulkanDispatchObject(LogicalPass::DispatchState& ds) : m_ds(&ds) {}
         ~VulkanDispatchObject(){}
-        DispatchObject& updateConstantRaw(uint32_t slot, const void* data, size_t size) override{
-            uint32_t offset = slot * 4;
+        DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) override{
             std::memcpy(m_ds->pushData.data() + offset, data, size);
             m_ds->pushDataSize = std::max(m_ds->pushDataSize, static_cast<uint32_t>(offset + size));
             return *this;
         }
-        DispatchObject& updateResource(uint32_t slot, ResourceHandle handle) override{
-            m_ds->slotValues.at(slot) = handle;
+        DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) override{
+            m_ds->resourceOffsets.at(offset) = handle;
             return *this;
         }
         DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) override {
@@ -56,19 +55,18 @@ namespace rhi::vk {
             return *this;
         }
 
-        PassBuilder& setUniformRaw(uint32_t slot, const void* data, size_t size) override {
+        PassBuilder& setUniformRaw(uint32_t offset, const void* data, size_t size) override {
             // リングバッファからメモリ確保
             auto alloc = m_device.getConstantBufferManager().allocateAndWrite(data, (uint32_t)size);
-            m_uboBindings[slot] = { alloc.index, alloc.offset };
+            m_uboBindings[offset] = { alloc.index, alloc.offset };
             return *this;
         }
-        PassBuilder& setStaticUniform(uint32_t slot, ResourceHandle handle) override {
+        PassBuilder& setStaticUniform(uint32_t offset, ResourceHandle handle) override {
             uint32_t index = m_graph.getPhysicalIndex(handle);
-            m_uboBindings[slot] = { index, 0 }; // スタティックはオフセット0 // Todo見直し
+            m_uboBindings[offset] = { index, 0 }; // スタティックはオフセット0 // Todo見直し
             return *this;
         }
-        PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) override {
-            uint32_t offset = slot * 4;
+        PassBuilder& setConstantRaw(uint32_t offset, const void* data, size_t size) override {
             if (offset + size > MAX_PUSH_CONSTANT_SIZE) {
                 throw std::runtime_error("Push constants limit exceeded!");
             }
@@ -79,8 +77,8 @@ namespace rhi::vk {
             return *this;
         }
 
-        PassBuilder& setResource(uint32_t slot, ResourceHandle handle) override {
-            m_node.slotValues[slot] = handle;
+        PassBuilder& setResource(uint32_t offset, ResourceHandle handle) override {
+            m_node.resourceOffsets[offset] = handle;
             return *this;
         }
 
@@ -91,25 +89,22 @@ namespace rhi::vk {
             ds.x = x; ds.y = y; ds.z = z;
             ds.pushData = m_node.pushData;         // 配列のコピー
             ds.pushDataSize = m_node.pushDataSize;
-            ds.slotValues = m_node.slotValues;     // Mapのコピー
+            ds.resourceOffsets = m_node.resourceOffsets;     // Mapのコピー
             m_dispatchObjects.emplace_back(ds);
             // 2. 実行コマンドを登録。ラムダには ID のみをキャプチャさせる
             m_node.commands.push_back([&node = m_node, &graph = m_graph, id, this](VulkanCommandList& cmd) {
                 // 実行時に最新のスナップショットを取得
                 auto& state = node.dispatchStates.at(id);
-                for (auto const& [slot, handle] : state.slotValues) {
+                for (auto const& [offset, handle] : state.resourceOffsets) {
                     uint32_t bindlessIndex = graph.getPhysicalIndex(handle);
-                    uint32_t offset = slot * 4;
                     if (offset + 4 <= MAX_PUSH_CONSTANT_SIZE) {
                         std::memcpy(state.pushData.data() + offset, &bindlessIndex, 4);
                         state.pushDataSize = std::max(state.pushDataSize, offset + 4);
                     }
                 }
-                for (auto const& [slot, binding] : m_uboBindings) {
-                    // 例: Slot 1 -> Offset 8 (Index), 12 (Offset)
-                    uint32_t pushOffset = slot * 8; 
-                    cmd.setPushData(pushOffset, 4, &binding.index);
-                    cmd.setPushData(pushOffset + 4, 4, &binding.offset);
+                for (auto const& [offset, binding] : m_uboBindings) {
+                    cmd.setPushData(offset, 4, &binding.index);
+                    cmd.setPushData(offset + 4, 4, &binding.offset);
                 }
                 // この dispatch 専用のプッシュ定数を送信
                 if (state.pushDataSize > 0) {
@@ -194,7 +189,7 @@ namespace rhi::vk {
             } else {
                 m_resourceRegistry[h].consumers.push_back(passIndex);
             }
-            node.slotValues[proto.getRequirements()[i].slotIndex] = h;
+            node.resourceOffsets[proto.getRequirements()[i].slotIndex] = h;
         }
         
         auto builder = std::make_unique<VulkanPassBuilder>(*this, node, m_device);
