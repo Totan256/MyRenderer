@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <optional>
 namespace rhi::vk{
+    class ConstantBufferManager; // 前方宣言
+
     // エラーチェック用の簡易マクロ
     #define VK_CHECK(call) \
         do { \
@@ -47,9 +49,14 @@ namespace rhi::vk{
         VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
         VkDescriptorSet getBindlessDescriptorSet() const { return m_bindlessDescriptorSet; }
 
+        // UBO用
+        uint32_t getMinUniformBufferOffsetAlignment() const { return m_minUniformBufferOffsetAlignment; }
+        ConstantBufferManager& getConstantBufferManager() { return *m_constantBufferManager; }
+
         // 空いているインデックスを割り当ててディスクリプタ更新
         uint32_t registerBuffer(VkBuffer buffer, VkDeviceSize size);
         uint32_t registerImage(VkImageView view);
+        uint32_t registerUniformBuffer(VkBuffer buffer, VkDeviceSize size);
         void unregisterIndex(uint32_t index);
 
     private:
@@ -59,8 +66,9 @@ namespace rhi::vk{
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;
         uint32_t m_computeQueueFamilyIndex = 0;
-        
         VmaAllocator m_allocator = VK_NULL_HANDLE;
+        uint32_t m_minUniformBufferOffsetAlignment = 256;
+        std::unique_ptr<ConstantBufferManager> m_constantBufferManager;
         VkDescriptorPool m_bindlessPool= VK_NULL_HANDLE;
         VkDescriptorSetLayout m_bindlessLayout= VK_NULL_HANDLE;
         VkDescriptorSet m_bindlessDescriptorSet= VK_NULL_HANDLE;
@@ -74,9 +82,6 @@ namespace rhi::vk{
         
         void createBindlessResources(); // 初期化時に呼ぶ
 
-
-
-        // 内部ヘルパー関数
         void createInstance();
         void pickPhysicalDevice();
         void createLogicalDevice();

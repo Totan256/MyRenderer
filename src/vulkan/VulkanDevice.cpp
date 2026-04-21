@@ -1,4 +1,5 @@
 ﻿#include "VulkanDevice.hpp"
+#include "VulkanConstantBufferManager.hpp"
 
 
 #define VMA_IMPLEMENTATION
@@ -9,9 +10,18 @@ namespace rhi::vk{
         // ヘルパー関数の呼び出し。VK_CHECKが失敗時に例外を投げるため、安全に処理できます。
         createInstance();
         pickPhysicalDevice();
+
+        // 制限の取得
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        m_minUniformBufferOffsetAlignment = static_cast<uint32_t>(properties.limits.minUniformBufferOffsetAlignment);
+
         createLogicalDevice();
         createAllocator();
         createBindlessResources();
+
+        // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
+        m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 1024 * 1024 * 16, 2);
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
     }
@@ -66,10 +76,8 @@ namespace rhi::vk{
         for (uint32_t i = 0; i < queueFamilyCount; ++i) {
             // VK_QUEUE_COMPUTE_BITが含まれ、VK_QUEUE_GRAPHICS_BITが含まれないもの（または両方含むもの）を探す
             if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-                // 最もシンプルなのは、Computeビットを持つ最初のファミリーを選択すること
-                // 描画（Graphics）機能は不要なので、Compute専用キューがあれば理想的ですが、
-                // 多くのGPUではGraphicsとComputeが兼用（両方のビットが立っている）されています。
-                // 今回はComputeビットが立っているものを見つけたら採用します。
+                // 今回はComputeビットが立っているものを見つけたら採用
+                // Todo 後で見直し
                 return i;
             }
         }
@@ -133,6 +141,7 @@ namespace rhi::vk{
         indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
         indexingFeatures.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
         indexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
 
         // 8. 論理デバイス作成情報の定義
         VkDeviceCreateInfo createInfo{};
@@ -177,6 +186,7 @@ namespace rhi::vk{
 
 
     VulkanDevice::~VulkanDevice(){    
+        m_constantBufferManager.reset();
         // 論理デバイスの解放
         if (m_device != VK_NULL_HANDLE) {
             if (m_bindlessLayout != VK_NULL_HANDLE) {
@@ -190,7 +200,9 @@ namespace rhi::vk{
             if (m_allocator != VK_NULL_HANDLE) {
                 vmaDestroyAllocator(m_allocator);
             }
+            
             vkDestroyDevice(m_device, nullptr);
+            
         }
         
         // インスタンスの解放
@@ -274,40 +286,46 @@ namespace rhi::vk{
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | 
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
-        VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{};
-        bindingFlags.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+        VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT };
         std::vector<VkDescriptorBindingFlags> allFlags = {
+            flags,
             flags,
             flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
         };
-        bindingFlags.bindingCount = 2;
+        bindingFlags.bindingCount = 3;
         bindingFlags.pBindingFlags = allFlags.data();
 
-        // 2. レイアウトの作成 (Binding 0: Buffers, Binding 1: Images)
-        VkDescriptorSetLayoutBinding bindings[2] = {};
+        VkDescriptorSetLayoutBinding bindings[3] = {};
+        // Binding 0: Storage Buffers
         bindings[0].binding = 0;
         bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[0].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[0].stageFlags = VK_SHADER_STAGE_ALL;
-
+        // Binding 1: Storage Images
         bindings[1].binding = 1;
         bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         bindings[1].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[1].stageFlags = VK_SHADER_STAGE_ALL;
+        // Binding 2: Uniform Buffers
+        bindings[2].binding = 2;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[2].descriptorCount = MAX_BINDLESS_RESOURCES;
+        bindings[2].stageFlags = VK_SHADER_STAGE_ALL;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.pNext = &bindingFlags;
-        layoutInfo.bindingCount = 2;
+        layoutInfo.bindingCount = 3;
         layoutInfo.pBindings = bindings;
         layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 
-        vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bindlessLayout);
+        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bindlessLayout));
 
         //  プールの作成とセットの割り当て（UPDATE_AFTER_BIND フラグ
         std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_BINDLESS_RESOURCES },
-            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_BINDLESS_RESOURCES}
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_BINDLESS_RESOURCES},
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_BINDLESS_RESOURCES }
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -319,19 +337,33 @@ namespace rhi::vk{
 
         // ディスクリプタセットの割り当て
         // 可変長配列（Variable Descriptor Count）を使用する場合 pNext で最大数を指定する必要があり
-        uint32_t maxBindingCounts[2] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES };
+        uint32_t maxBindingCounts[3] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES};
         VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
         variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
         variableCountInfo.descriptorSetCount = 1;
-        variableCountInfo.pDescriptorCounts = &maxBindingCounts[1]; // 最後のバインディング(Image)の最大数
+        variableCountInfo.pDescriptorCounts = &maxBindingCounts[2]; // 最後のバインディング(UBO)の最大数
 
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.pNext = &variableCountInfo; // ここで可変長配列の設定を渡す
+        allocInfo.pNext = &variableCountInfo; //可変長配列の設定を渡す
         allocInfo.descriptorPool = m_bindlessPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &m_bindlessLayout;
 
         VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_bindlessDescriptorSet));
+    }
+
+    uint32_t VulkanDevice::registerUniformBuffer(VkBuffer buffer, VkDeviceSize size) {
+        uint32_t index = allocateIndex();
+        VkDescriptorBufferInfo bufferInfo{ buffer, 0, size };
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = m_bindlessDescriptorSet;
+        write.dstBinding = 2;
+        write.dstArrayElement = index;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo = &bufferInfo;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        return index;
     }
 }

@@ -71,11 +71,15 @@ namespace rhi::vk{
                 }
 
                 if (!assignedBuffer) {
-                    // VulkanBufferのコンストラクタに合わせて作成
-                    // 第4、第5引数は用途に応じて設定（例: StorageBuffer用）
+                    VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+                    if (bufferDesc->usageFlags & (uint32_t)rhi::ResourceUsage::ConstantBuffer) {
+                        usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+                    } else {
+                        usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                    }
                     auto newBuf = std::make_unique<VulkanBuffer>(
                         m_device, m_device.getAllocator(), bufferDesc->size,
-                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                        usage,
                         VMA_MEMORY_USAGE_AUTO
                     );
                     assignedBuffer = newBuf.get();

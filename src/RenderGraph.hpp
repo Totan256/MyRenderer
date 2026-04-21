@@ -54,20 +54,22 @@ namespace rhi {
         PassBuilder& setConstant(uint32_t slot, const T& data) {
             return setConstantRaw(slot, &data, sizeof(T));
         }
+        // UBOセット
+        template<typename T>
+        PassBuilder& setUniform(uint32_t slot, const T& data) {
+            static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
+            return setUniformRaw(slot, &data, sizeof(T));
+        }
         // Bindless用インデックスのセット
         virtual PassBuilder& setResource(uint32_t slot, rhi::ResourceHandle handle) = 0;
+        virtual PassBuilder& setStaticUniform(uint32_t slot, rhi::ResourceHandle handle) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
 
     protected:
         virtual PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) = 0;
+        virtual PassBuilder& setUniformRaw(uint32_t slot, const void* data, size_t size) = 0;
     };// Todo addPass->addPassができないようにしとく
-
-
-
-    // リソースの設計図（仮想リソース作成用）
-    
-
 
     struct ResourceRegistration {
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
@@ -87,13 +89,8 @@ namespace rhi {
         uint32_t lastPass  = 0;          // 最後に登場する実行順インデックス
     };
 
-    struct LogicalPass {
+    struct LogicalPass {// Tod最適化検討
         std::string name;
-        // struct ResourceBinding {
-        //     ResourceHandle handle;
-        //     uint32_t offset;
-        // };
-        // std::vector<ResourceBinding> resourceBindings;
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
 
@@ -143,6 +140,8 @@ namespace rhi {
         
         std::vector<ResourceRegistration> m_resourceRegistry;
         std::vector<ResourceLifetime> m_resourceLifetimes;
-        std::deque<LogicalPass> m_logicalNodes; 
+        std::deque<LogicalPass> m_logicalNodes;
+
+
     };
 }

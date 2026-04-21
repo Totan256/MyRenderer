@@ -27,13 +27,9 @@ namespace rhi {
         }
     };
     struct ImageDesc {
-        uint32_t width = 1;
-        uint32_t height = 1;
-        uint32_t depth = 1;
-        uint32_t mipLevels = 1;
-        uint32_t arrayLayers = 1;
+        uint32_t width = 1; uint32_t height = 1; uint32_t depth = 1;
+        uint32_t mipLevels = 1; uint32_t arrayLayers = 1;
         Format format = Format::R8G8B8A8_Unorm;
-        // ビットフラグ。rhi::ResourceUsage をビットフラグ化して保持
         uint32_t usageFlags = 0;
 
         bool isCompatible(const ImageDesc& other) const {
@@ -67,7 +63,7 @@ namespace rhi {
     enum class ResourceUsage : uint32_t {
         Undefined,
         // Read系
-        ConstantBuffer,
+        ConstantBuffer,   // UBO
         VertexBuffer,
         IndexBuffer,
         SampledTexture,   // Descriptor 経由の Read

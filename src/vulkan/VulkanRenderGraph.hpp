@@ -6,6 +6,7 @@
 #include "vulkan/VulkanComputePipeline.hpp"
 #include "VulkanSync.hpp"
 #include "VulkanResourceAllocator.hpp"
+#include "VulkanConstantBufferManager.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 #include <map>
@@ -18,6 +19,10 @@ namespace rhi::vk {
 
     class VulkanRenderGraph : public RenderGraph {
     public:
+        VulkanRenderGraph(VulkanDevice& device): m_device(device), m_resourceAllocator(device){
+            // Todo　漏れがないかチェック
+        }    
+
         PassBuilder& addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) override;
         ResourceHandle importResource(Resource* res) override;
         ResourceHandle createImage(const ImageDesc& desc) override;
@@ -39,6 +44,7 @@ namespace rhi::vk {
 
         VulkanResourceAllocator m_resourceAllocator;
 
+        VulkanDevice& m_device;
         
         std::vector<uint32_t> m_sortedIndices;
     };

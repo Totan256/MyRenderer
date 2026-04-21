@@ -6,6 +6,7 @@
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 #include "VulkanResourceAllocator.hpp"
+#include "VulkanConstantBufferManager.hpp"
 #include <map>
 #include <queue>
 #include <vector>
@@ -38,13 +39,16 @@ namespace rhi::vk {
         LogicalPass::DispatchState* m_ds;
     };
 
-
+    struct UBOBinding {
+        uint32_t index;
+        uint32_t offset;
+    };
     class VulkanPassBuilder : public PassBuilder {
     public:
-        VulkanPassBuilder(VulkanRenderGraph& graph, LogicalPass& node) 
-        : m_graph(graph), m_node(node) {}
+        VulkanPassBuilder(VulkanRenderGraph& graph, LogicalPass& node, VulkanDevice& device) 
+            : m_graph(graph), m_node(node), m_device(device) {}
 
-        PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) {
+        PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) override {
             m_node.commands.push_back([&pipeline](VulkanCommandList& cmd) {
                 cmd.bindPipeline(pipeline);
                 cmd.bindGlobalDescriptorSet();
@@ -52,6 +56,17 @@ namespace rhi::vk {
             return *this;
         }
 
+        PassBuilder& setUniformRaw(uint32_t slot, const void* data, size_t size) override {
+            // リングバッファからメモリ確保
+            auto alloc = m_device.getConstantBufferManager().allocateAndWrite(data, (uint32_t)size);
+            m_uboBindings[slot] = { alloc.index, alloc.offset };
+            return *this;
+        }
+        PassBuilder& setStaticUniform(uint32_t slot, ResourceHandle handle) override {
+            uint32_t index = m_graph.getPhysicalIndex(handle);
+            m_uboBindings[slot] = { index, 0 }; // スタティックはオフセット0 // Todo見直し
+            return *this;
+        }
         PassBuilder& setConstantRaw(uint32_t slot, const void* data, size_t size) override {
             uint32_t offset = slot * 4;
             if (offset + size > MAX_PUSH_CONSTANT_SIZE) {
@@ -79,7 +94,7 @@ namespace rhi::vk {
             ds.slotValues = m_node.slotValues;     // Mapのコピー
             m_dispatchObjects.emplace_back(ds);
             // 2. 実行コマンドを登録。ラムダには ID のみをキャプチャさせる
-            m_node.commands.push_back([&node = m_node, &graph = m_graph, id](VulkanCommandList& cmd) {
+            m_node.commands.push_back([&node = m_node, &graph = m_graph, id, this](VulkanCommandList& cmd) {
                 // 実行時に最新のスナップショットを取得
                 auto& state = node.dispatchStates.at(id);
                 for (auto const& [slot, handle] : state.slotValues) {
@@ -89,6 +104,12 @@ namespace rhi::vk {
                         std::memcpy(state.pushData.data() + offset, &bindlessIndex, 4);
                         state.pushDataSize = std::max(state.pushDataSize, offset + 4);
                     }
+                }
+                for (auto const& [slot, binding] : m_uboBindings) {
+                    // 例: Slot 1 -> Offset 8 (Index), 12 (Offset)
+                    uint32_t pushOffset = slot * 8; 
+                    cmd.setPushData(pushOffset, 4, &binding.index);
+                    cmd.setPushData(pushOffset + 4, 4, &binding.offset);
                 }
                 // この dispatch 専用のプッシュ定数を送信
                 if (state.pushDataSize > 0) {
@@ -102,6 +123,8 @@ namespace rhi::vk {
     private:
         VulkanRenderGraph& m_graph;
         LogicalPass& m_node;
+        VulkanDevice& m_device;
+        std::map<uint32_t, UBOBinding> m_uboBindings;
         std::deque<VulkanDispatchObject> m_dispatchObjects;
     };
 
@@ -174,11 +197,10 @@ namespace rhi::vk {
             node.slotValues[proto.getRequirements()[i].slotIndex] = h;
         }
         
-        auto builder = std::make_unique<VulkanPassBuilder>(*this, node);
+        auto builder = std::make_unique<VulkanPassBuilder>(*this, node, m_device);
         m_builders.push_back(std::move(builder));
         return *m_builders.back();
     }
-    // src/vulkan/VulkanRenderGraph.cpp
 
 void VulkanRenderGraph::compile() {
     m_physicalNodes.resize(m_logicalNodes.size());
@@ -261,7 +283,7 @@ void VulkanRenderGraph::compile() {
                 command(cmd);
             }
             
-            // 3. 実行後、リソースの実状態を更新（次のフレームやグラフ外での利用のため）
+            // 3. Todo実行後、リソースの実状態を更新（次のフレームやグラフ外での利用のため）
             // for (size_t i = 0; i < logicalNode.resources.size(); ++i) {
             //     if (auto* res = logicalNode.requirements[i]) {
             //         res->setState(logicalNode.requirements[i].usage, logicalNode.requirements[i].stage);

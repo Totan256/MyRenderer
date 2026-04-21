@@ -33,7 +33,6 @@ namespace rhi::vk{
 
         VulkanResourceState result{};
         result.stageMask = MapToVulkanStage(stage);
-
         
         switch (usage) {
         case rhi::ResourceUsage::Undefined:
@@ -89,6 +88,10 @@ namespace rhi::vk{
 
         // Buffer専用の状態
         case rhi::ResourceUsage::ConstantBuffer:
+            result.accessMask = VK_ACCESS_2_UNIFORM_READ_BIT;
+            result.layout     = VK_IMAGE_LAYOUT_UNDEFINED;
+            break;
+            
         case rhi::ResourceUsage::VertexBuffer:
         case rhi::ResourceUsage::IndexBuffer:
             result.accessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;

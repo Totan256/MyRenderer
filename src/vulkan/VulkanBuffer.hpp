@@ -48,7 +48,8 @@ namespace rhi::vk{
 
         rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
-        
+        void* m_mappedPtr;
+        bool m_isPersistentlyMapped = false;
         uint32_t m_bindlessIndex;
     };
 

@@ -18,7 +18,7 @@ namespace rhi::vk {
         // 2. VMAの割り当て情報の定義
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = memoryUsage;
-        
+        VkResult result;
         // VMA_MEMORY_USAGE_AUTO はVulkanの推奨メモリタイプを自動選択します。
         // CPUから書き込みたい場合（CPU_TO_GPU）は、自動的にマッパブルなメモリを選んでくれます。
         if (memoryUsage == VMA_MEMORY_USAGE_AUTO_PREFER_HOST || 
@@ -26,22 +26,33 @@ namespace rhi::vk {
             // マップ可能にしておく（永続的にマップするフラグ）
             allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | 
                             VMA_ALLOCATION_CREATE_MAPPED_BIT;
+            m_isPersistentlyMapped = true;
+            VmaAllocationInfo resInfo;
+            result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, &resInfo);
+            m_mappedPtr = resInfo.pMappedData;
+            
+        } else{
+            result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, nullptr);
         }
 
         // 3. バッファとメモリを同時に作成
-        VkResult result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, nullptr);
-        
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Failed to create buffer!");
         }
 
-        m_bindlessIndex = device.registerBuffer(m_buffer, size);
+        if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
+            m_bindlessIndex = device.registerUniformBuffer(m_buffer, size);
+        } else {
+            m_bindlessIndex = device.registerBuffer(m_buffer, size);
+        }
     }
 
     VulkanBuffer::~VulkanBuffer() {
         // メモリとバッファを解放
         if (m_buffer != VK_NULL_HANDLE) {
             m_device.unregisterIndex(m_bindlessIndex);
+            
+            unmap();
         }
         if (m_buffer != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
             vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
@@ -56,20 +67,24 @@ namespace rhi::vk {
 
         // VMAを使ってメモリをマップ（CPUからアクセス可能なポインタを取得）
         void* mappedData;
-        VkResult result = vmaMapMemory(m_allocator, m_allocation, &mappedData);
-        
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to map buffer memory!");
+        if(m_isPersistentlyMapped){
+            mappedData = m_mappedPtr;
+            std::memcpy(mappedData, data, dataSize);
+        }else{
+            VkResult result = vmaMapMemory(m_allocator, m_allocation, &mappedData);
+            if (result != VK_SUCCESS) {
+                throw std::runtime_error("Failed to map buffer memory!");
+            }
+            // データをコピー
+            std::memcpy(mappedData, data, dataSize);
+            // アンマップ（書き込み終了）
+            vmaUnmapMemory(m_allocator, m_allocation);
         }
-
-        // データをコピー
-        std::memcpy(mappedData, data, dataSize);
-
-        // アンマップ（書き込み終了）
-        vmaUnmapMemory(m_allocator, m_allocation);
     }
 
     void* VulkanBuffer::map() {
+        if (m_isPersistentlyMapped)  return m_mappedPtr;
+        
         void* data;
         VkResult result = vmaMapMemory(m_allocator, m_allocation, &data);
         if (result != VK_SUCCESS) throw std::runtime_error("Failed to map memory");
@@ -77,6 +92,7 @@ namespace rhi::vk {
     }
 
     void VulkanBuffer::unmap() {
+        if(m_isPersistentlyMapped) return;
         vmaUnmapMemory(m_allocator, m_allocation);
     }
 }
