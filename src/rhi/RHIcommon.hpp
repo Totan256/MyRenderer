@@ -83,7 +83,7 @@ namespace rhi {
     };
     
     struct ResourceRequirement {
-        uint32_t      slotIndex;
+        uint32_t      offset;
         ResourceUsage usage;
         ShaderStage   stage;
     };

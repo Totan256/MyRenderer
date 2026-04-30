@@ -6,18 +6,26 @@
 #include <functional>
 #include <variant>
 #include <map>
+#include <memory>
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 
 namespace rhi {
     using ResourceHandle = uint32_t;
     const ResourceHandle InvalidResource = 0xFFFFFFFF;
+
+    class BindGroup {
+    public:
+        BindGroup(const std::vector<ResourceRequirement>& reqs) : requirements(reqs) {}
+        std::vector<ResourceRequirement> requirements;
+    };
     
     class DispatchObject {
     public:
         virtual ~DispatchObject() = default;
         virtual DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
         virtual DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) = 0;
+        // virtual DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) = 0; todo実装
         virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
         // テンプレートでのヘルパー
         template<typename T>
@@ -25,50 +33,57 @@ namespace rhi {
             updateConstantRaw(offset, &value, sizeof(T));
             return *this;
         }
+        template<typename T>
+        DispatchObject& setUniform(uint32_t offset, const T& value) {
+            static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
+            return setUniformRaw(offset, &value, sizeof(T));
+        }
     };
     
-    class PassTemplate {
-    public:
-        PassTemplate(const std::string& name) : m_name(name) {}
-        PassTemplate& addSlot(uint32_t slot, ResourceUsage usage, ShaderStage stage) {
-            m_requirements.push_back({slot, usage, stage});
-            return *this;
-        }
-        std::string getName() const { return m_name; }
-        std::vector<ResourceRequirement> getRequirements() const { return m_requirements; }
-        // Todo read/write などのショートカットメソッド
-    private:
-        friend class RenderGraph;
-        std::string m_name;
-        std::vector<ResourceRequirement> m_requirements;
-    };
+    // class PassTemplate {
+    // public:
+    //     PassTemplate(const std::string& name) : m_name(name) {}
+    //     PassTemplate& addSlot(uint32_t slot, ResourceUsage usage, ShaderStage stage) {
+    //         m_requirements.push_back({slot, usage, stage});
+    //         return *this;
+    //     }
+    //     std::string getName() const { return m_name; }
+    //     std::vector<ResourceRequirement> getRequirements() const { return m_requirements; }
+    //     // Todo read/write などのショートカットメソッド
+    // private:
+    //     friend class RenderGraph;
+    //     std::string m_name;
+    //     std::vector<ResourceRequirement> m_requirements;
+    // };
 
     // コマンド記録用のインターフェース
     class PassBuilder {
     public:
         virtual ~PassBuilder() = default;
         // パイプラインのセット
-        virtual PassBuilder& bindPipeline(ComputePipeline& pipeline) = 0;
+        // virtual PassBuilder& bindPipeline(ComputePipeline& pipeline) = 0;
         // Push Constants のセット
-        template<typename T>
-        PassBuilder& setConstant(uint32_t offset, const T& data) {
-            return setConstantRaw(offset, &data, sizeof(T));
-        }
-        // UBOセット
-        template<typename T>
-        PassBuilder& setUniform(uint32_t offset, const T& data) {
-            static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
-            return setUniformRaw(offset, &data, sizeof(T));
-        }
-        // Bindless用インデックスのセット
-        virtual PassBuilder& setResource(uint32_t offset, rhi::ResourceHandle handle) = 0;
-        virtual PassBuilder& setStaticUniform(uint32_t offset, rhi::ResourceHandle handle) = 0;
+        // template<typename T>
+        // PassBuilder& setConstant(uint32_t offset, const T& data) {
+        //     return setConstantRaw(offset, &data, sizeof(T));
+        // }
+        // // UBOセット
+        // template<typename T>
+        // PassBuilder& setUniform(uint32_t offset, const T& data) {
+        //     static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
+        //     return setUniformRaw(offset, &data, sizeof(T));
+        // }
+        // // Bindless用インデックスのセット
+        // virtual PassBuilder& setResource(uint32_t offset, rhi::ResourceHandle handle) = 0;
+        // virtual PassBuilder& setStaticUniform(uint32_t offset, rhi::ResourceHandle handle) = 0;
+        virtual PassBuilder& bind(const BindGroup& desc) = 0;
+        virtual PassBuilder& bind(uint32_t offset, ResourceUsage usage) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
 
     protected:
-        virtual PassBuilder& setConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
-        virtual PassBuilder& setUniformRaw(uint32_t offset, const void* data, size_t size) = 0;
+        // virtual PassBuilder& setConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
+        // virtual PassBuilder& setUniformRaw(uint32_t offset, const void* data, size_t size) = 0;
     };// Todo addPass->addPassができないようにしとく
 
     struct ResourceRegistration {
@@ -91,23 +106,26 @@ namespace rhi {
 
     struct LogicalPass {// Tod最適化検討
         std::string name;
+        std::string shaderPath;
+        // パスのシグネチャ (オフセット -> Usage)
+        std::map<uint32_t, ResourceUsage> signature;
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
 
-        std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
-        uint32_t pushDataSize = 0;
-        std::map<uint32_t, ResourceHandle> resourceOffsets;
+        // std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
+        // uint32_t pushDataSize = 0;
+        // std::map<uint32_t, ResourceHandle> resourceOffsets;
         
         struct DispatchState {
+            uint32_t id;
             std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
             uint32_t pushDataSize = 0;
             std::map<uint32_t, ResourceHandle> resourceOffsets;
+            struct UBOBinding { uint32_t index; uint32_t offset; };
+            std::map<uint32_t, UBOBinding> uboBindings;
             uint32_t x, y, z;
         };
-        uint32_t nextDispatchId = 0;
-        std::map<uint32_t, DispatchState> dispatchStates;
-
-        std::vector<std::function<void(CommandList&)>> commands;
+        std::vector<DispatchState> dispatchStates;
     };
 
     // レンダーグラフ本体
@@ -122,8 +140,7 @@ namespace rhi {
         virtual ResourceHandle createImage(const ImageDesc& desc) = 0;
         virtual ResourceHandle createBuffer(const BufferDesc& desc) = 0;
 
-        // パスの登録（この時点では実行されず，記録のみ）
-        virtual PassBuilder& addPass(const PassTemplate& proto, const std::vector<ResourceHandle>& resources) = 0;
+        virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath) = 0;
 
         // バリアの計算
         virtual void compile() = 0;

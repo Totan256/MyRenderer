@@ -21,7 +21,8 @@ namespace rhi::vk{
         createBindlessResources();
 
         // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
-        m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 1024 * 1024 * 16, 2);
+        // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意
+        m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 65536, 2);
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
     }
