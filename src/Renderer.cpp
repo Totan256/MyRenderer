@@ -1,79 +1,109 @@
 ﻿#include "Renderer.hpp"
 #include "ImageExporter.hpp"
-#include <glm/glm.hpp>
+#include "vulkan/VulkanRenderGraph.hpp"
+#include "vulkan/VulkanDevice.hpp"
 #include <iostream>
-#include <cstdint>
-#include "RHIForward.hpp"
+#include <cstddef>
 
-
-struct SceneData {
-    glm::vec4 resolution; // width, height, 0, 0
-    glm::vec4 params;     // time, frame, 0, 0
-    glm::vec4 cameraPos;
-};
-struct PushConstants {
+// シェーダーの layout(push_constant) と一致させる構造体
+struct ComputePushConstants {
     uint32_t outputImageIndex;
-    uint32_t sceneBufferIndex;
+    float time;
+    uint32_t resX;
+    uint32_t resY;
 };
 
 void Renderer::render(float time) {
-    // rhi::ComputePipeline pipeline(m_device, "shaders/test.comp", 16);
-    // // 1. 出力用Image
-    // rhi::Image outputImage(m_device, m_width, m_height);
+    // ダウンキャストしてVulkan固有の機能にアクセス
+    auto& vkDevice = static_cast<rhi::vk::VulkanDevice&>(m_device);
 
-    // // 2. 読み戻し用Staging Buffer (RGBA8 = 4 bytes per pixel)
-    // VkDeviceSize imageSize = m_width * m_height * 4;
-    // rhi::Buffer m_stagingBuffer(m_device, m_device.getAllocator(), imageSize,
-    //     VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // TRANSFER_DSTを追加
-    //     VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-    // // 3. Uniform Buffer (SceneData)
-    // rhi::Buffer sceneBuffer(m_device, m_device.getAllocator(), sizeof(SceneData),
-    //     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, // 修正
-    //     VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    // ---------------------------------------------------------
+    // 1. 物理リソースの作成（RenderGraph外で管理して結果を読み出すため）
+    // ---------------------------------------------------------
+    std::cout << "Creating physical resources..." << std::endl;
+    rhi::vk::VulkanImage outputImage(vkDevice, m_width, m_height);
+    
+    size_t imageSize = m_width * m_height * 4;
+    rhi::vk::VulkanBuffer stagingBuffer(
+        vkDevice, vkDevice.getAllocator(), imageSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
 
-    // // シーン情報の更新
-    // SceneData scene{};
-    // scene.resolution = glm::vec4(m_width, m_height, 0, 0);
-    // scene.params = glm::vec4(time, 0, 0, 0);
-    // sceneBuffer.writeData(&scene, sizeof(SceneData));
+    // ---------------------------------------------------------
+    // 2. RenderGraph の構築
+    // ---------------------------------------------------------
+    std::cout << "Building RenderGraph..." << std::endl;
+    rhi::vk::VulkanRenderGraph graph(vkDevice);
+    std::cout << "RenderGraph created." << std::endl;
+    // 物理リソースをグラフにインポート
+    auto hOutput = graph.importResource(&outputImage);
+    auto hStaging = graph.importResource(&stagingBuffer);
 
-    // rhi::CommandList cmd(m_device);
-    // cmd.begin();
+    // バインドグループの定義（オフセットと用途の紐付け）
+    auto& bindGroup = graph.createBindGroup({
+        {offsetof(ComputePushConstants, outputImageIndex), rhi::ResourceUsage::StorageWrite}
+    });
+    std::cout << "BindGroup created." << std::endl;
+    // メインのコンピュートパスを追加
+    auto& mainPass = graph.addPass("MainCompute", "shaders/simple.comp")
+        .bind(bindGroup);
 
-    // // 1. Layout遷移:General
-    // outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_GENERAL);
+    // ディスパッチの設定と動的パラメータの書き込み
+    mainPass.dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1)
+        .updateResource(offsetof(ComputePushConstants, outputImageIndex), hOutput)
+        .updateConstant(offsetof(ComputePushConstants, time), time)
+        .updateConstant(offsetof(ComputePushConstants, resX), m_width)
+        .updateConstant(offsetof(ComputePushConstants, resY), m_height);
 
-    // // 2. Dispatch
-    // cmd.bindPipeline(pipeline);
-    // cmd.bindGlobalDescriptorSet();
-    // // インデックスだけをシェーダに渡す
-    // cmd.setPushResource(0, outputImage);
-    // cmd.setPushResource(4, sceneBuffer);
-    // cmd.setPushData(8, sizeof(m_width), &m_width);
-    // cmd.setPushData(12, sizeof(m_height), &m_height);
+    std::cout << "Main pass configured." << std::endl;
 
+    // 【ハック】出力画像を TransferSrc 状態へ遷移させるための「空パス」を追加
+    // これにより graph.compile() が自動でバリア（General -> TransferSrc）を張ってくれる
+    auto& copyTransitionPass = graph.addPass("CopyTransition", "")
+        .bind(0, rhi::ResourceUsage::TransferSrc)
+        .bind(4, rhi::ResourceUsage::TransferDst);
+    std::cout << "CopyTransition pass configured." << std::endl;
+    copyTransitionPass.dispatch(0, 0, 0)
+        .updateResource(0, hOutput)
+        .updateResource(4, hStaging);
+    std::cout << "compile started." << std::endl;
+    // 依存関係とバリアの解決
+    graph.compile();
+    std::cout << "compile finished." << std::endl;
+    // ---------------------------------------------------------
+    // 3. コマンドの記録と実行
+    // ---------------------------------------------------------
+    std::cout << "Executing RenderGraph..." << std::endl;
+    rhi::vk::VulkanCommandList cmd(vkDevice);
+    cmd.begin();
+    
+    // RenderGraph によるコンピュート実行とバリア展開
+    graph.execute(cmd); 
 
-    // cmd.dispatch((uint32_t)ceil(m_width / 16.0), (uint32_t)ceil(m_height / 16.0), 1);
+    // RenderGraph 実行後、画像は安全にコピーできる状態(TransferSrc)になっている
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {m_width, m_height, 1};
 
-    // // Layout遷移General->Transfer
-    // outputImage.transitionLayout(cmd.getCommandBuffer(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    vkCmdCopyImageToBuffer(
+        cmd.getCommandBuffer(),
+        outputImage.getImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        stagingBuffer.getNativeBuffer(),
+        1, &region
+    );
 
-    // // Image -> Buffer コピー
-    // outputImage.copyToBuffer(cmd.getCommandBuffer(), m_stagingBuffer.getNativeBuffer());
+    cmd.end();
+    cmd.submitAndWait(); // GPUの処理完了を待つ
 
-    // cmd.end();
-    // cmd.submitAndWait();
-
-    // saveResult("output.png", m_stagingBuffer);
+    // ---------------------------------------------------------
+    // 4. 画像の保存
+    // ---------------------------------------------------------
+    std::cout << "Saving output image..." << std::endl;
+    void* data = stagingBuffer.map();
+    ImageExporter::savePngUint8("output_shader.png", m_width, m_height, data);
+    stagingBuffer.unmap();
+    
+    std::cout << "Rendered successfully! Saved to output_shader.png" << std::endl;
 }
-
-// void Renderer::saveResult(const std::string& filename, rhi::Buffer& stagingBuffer) {
-    // // GPUの書き込みをCPUから見えるように
-    // vmaInvalidateAllocation(m_device.getAllocator(), stagingBuffer.getAllocation(), 0, VK_WHOLE_SIZE);
-    
-    // void* data = stagingBuffer.map();
-    // ImageExporter::savePngUint8(filename, m_width, m_height, data);
-    // stagingBuffer.unmap();
-    
-    // std::cout << "Render result saved to " << filename << std::endl;
-// }

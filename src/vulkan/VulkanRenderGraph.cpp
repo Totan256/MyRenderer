@@ -33,8 +33,7 @@ namespace rhi::vk {
                 throw std::runtime_error("Cannot set resource: offset " + std::to_string(offset) + 
                                          " is not defined in the pass signature. Did you forget to bind() it?");
             }
-            // ToDo: 将来的には m_node.signature[offset] (要求Usage) と registry[handle] の情報を使って、
-            // isCompatible による互換性チェックを追加
+            // ToDo: 将来的には m_node.signature[offset] (要求Usage) と registry[handle] でisCompatibleによる互換性チェックを追加
             m_ds.resourceOffsets[offset] = handle;
             return *this;
         }
@@ -99,7 +98,7 @@ namespace rhi::vk {
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
     }
-    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {
+    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {// todo リソースをdescから作れるようにするmust
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
         ResourceRegistration reg{}; reg.isImported = true; reg.physicalResource = res;
         m_resourceRegistry.push_back(reg); return handle;
@@ -127,6 +126,7 @@ namespace rhi::vk {
         }
     }
     void VulkanRenderGraph::compile() {
+        std::cout << "Compiling RenderGraph..." << std::endl;//debug
         // 1. 各パスの要件（requirements）をディスパッチから遅延集計する
         for (size_t passIndex = 0; passIndex < m_logicalNodes.size(); ++passIndex) {
             auto& node = m_logicalNodes[passIndex];
@@ -143,14 +143,14 @@ namespace rhi::vk {
             for (const auto& ds : node.dispatchStates) {
                 for (const auto& [offset, handle] : ds.resourceOffsets) {
                     auto it = node.signature.find(offset);
-                    // ここに到達した時点でシグネチャとの整合性は setResource で保証されている
+                    // ここに到達した時点でシグネチャとの整合性は setResource で保証されている，はず
                     
-                    // ToDo: マルチディスパッチ時の競合チェック（同一リソースの読み書き衝突検知）はここに実装する
-                    // ds（ディスパッチ）を跨いで、同じ handle が isWriteUsage でアクセスされていないか等。
+                    // todo: マルチディスパッチ時の競合チェック（同一リソースの読み書き衝突検知）はここに実装する
+                    // ds（ディスパッチ）を跨いで同じ handle が isWriteUsage でアクセスされていないか等
 
                     if (seenHandles.insert(handle).second) {
                         node.resourceHandles.push_back(handle);
-                        node.requirements.push_back({offset, it->second, rhi::ShaderStage::Compute}); // Compute固定
+                        node.requirements.push_back({offset, it->second, rhi::ShaderStage::Compute}); // Compute固定　todo他のstage
                         
                         // 基底クラスのソート機能のために producers / consumers を更新
                         if (isWriteUsage(it->second)) {
@@ -162,16 +162,16 @@ namespace rhi::vk {
                 }
             }
         }
-
+        std::cout << "RenderGraph requirements collected." << std::endl;//debug
         m_physicalNodes.resize(m_logicalNodes.size());
         std::vector<uint32_t> passIndices(m_logicalNodes.size());
         std::iota(passIndices.begin(), passIndices.end(), 0);
-        
+        std::cout << "Sorting passes..." << std::endl;//debug
         // 2. パスソート、ライフタイム計算、物理リソース割り当て
         std::vector<uint32_t> sortedIndices = getSortPasses(passIndices);
         calculateLifetimes(sortedIndices);
         m_resourceAllocator.allocate(m_resourceRegistry, m_resourceLifetimes);
-
+        std::cout << "Physical resources allocated." << std::endl;//debug
         // 3. バリアとレイアウト遷移の生成
         std::map<rhi::ResourceHandle, VulkanResourceState> currentStates;
         for (uint32_t passIdx : sortedIndices) {
@@ -208,6 +208,7 @@ namespace rhi::vk {
                 currentStates[h] = next;
             }
         }
+        std::cout << "Barriers and layout transitions generated." << std::endl;//debug
         m_sortedIndices = sortedIndices;
     }
 

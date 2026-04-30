@@ -88,7 +88,12 @@ namespace rhi {
 
     struct ResourceRegistration {
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
-        bool isImage() const { return std::holds_alternative<ImageDesc>(desc); }
+        bool isImage() const {
+            if (isImported && physicalResource) {
+            return physicalResource->isImage();
+        }
+        return std::holds_alternative<ImageDesc>(desc);
+    }
         
         Resource* physicalResource = nullptr; // import用
         bool isImported = false;
@@ -139,7 +144,10 @@ namespace rhi {
         // グラフ内でのみ使うリソースの予約
         virtual ResourceHandle createImage(const ImageDesc& desc) = 0;
         virtual ResourceHandle createBuffer(const BufferDesc& desc) = 0;
-
+        BindGroup& createBindGroup(const std::vector<ResourceRequirement>& bindings) {
+            m_bindGroups.push_back(std::make_unique<BindGroup>(bindings));
+            return *m_bindGroups.back();
+        }
         virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath) = 0;
 
         // バリアの計算
@@ -151,6 +159,7 @@ namespace rhi {
         virtual uint32_t getPhysicalIndex(ResourceHandle handle) = 0;
     private:
     protected:
+        std::vector<std::unique_ptr<BindGroup>> m_bindGroups;
         bool isWriteUsage(rhi::ResourceUsage usage);
         std::vector<uint32_t> getSortPasses(std::vector<uint32_t> passIndices);
         void calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices);

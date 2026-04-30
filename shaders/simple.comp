@@ -1,0 +1,37 @@
+#version 450
+// バインドレス（Descriptor Indexing）を使用するための拡張機能
+#extension GL_EXT_nonuniform_qualifier : enable
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// C++側の PushConstants 構造体と一致させる
+layout(push_constant) uniform PushConstants {
+    uint outputImageIndex;
+    float time;
+    uint resX;
+    uint resY;
+} pc;
+
+// Binding 1: Storage Image の配列 (画像出力用)
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D outputImages[];
+
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+
+    // 画面外の余剰スレッドは破棄
+    if (x >= pc.resX || y >= pc.resY) return;
+
+    // 0.0 ~ 1.0 に正規化されたUV座標
+    vec2 uv = vec2(x, y) / vec2(pc.resX, pc.resY);
+
+    // 時間(Time)を使って色が変化するグラデーションを作成
+    float r = 0.5 + 0.5 * sin(pc.time + uv.x * 6.28);
+    float g = uv.y;
+    float b = 0.5 + 0.5 * cos(pc.time + uv.y * 6.28);
+
+    vec4 color = vec4(r, g, b, 1.0);
+
+    ivec2 pixel_coords = ivec2(x, y);
+    imageStore(outputImages[pc.outputImageIndex], pixel_coords, color);
+}
