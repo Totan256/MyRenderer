@@ -1,59 +1,52 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : enable
 
-// 1ワークグループあたりのスレッド数（Vulkanの一般的な最大値）
 layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
 layout(push_constant) uniform PushConstants {
     uint inputIndex;
     uint outputIndex;
+    uint blockSumIndex; // 使わない場合は 0xFFFFFFFF
     uint elementCount;
 } pc;
 
-// Bindless用のSSBO配列
 layout(set = 0, binding = 0) buffer DataBuffer {
     uint data[];
 } buffers[];
 
-// Workgroup内の全スレッドで共有される超高速なメモリ（L1キャッシュ相当）
-// ダブルバッファリングして読み書きの競合を防ぐ
 shared uint sharedData[2][1024];
 
 void main() {
-    uint tid = gl_LocalInvocationID.x; // ワークグループ内のローカルID (0~1023)
-    uint gid = gl_GlobalInvocationID.x; // グローバルID
+    uint tid = gl_LocalInvocationID.x;
+    uint gid = gl_GlobalInvocationID.x;
+    uint wid = gl_WorkGroupID.x;
 
-    // 1. グローバルメモリ(VRAM)から共有メモリ(Shared Memory)へロード
+    // 範囲外は 0 として扱うことで、端数のブロックでも安全に計算できる
     uint value = (gid < pc.elementCount) ? buffers[pc.inputIndex].data[gid] : 0;
     sharedData[0][tid] = value;
-    
-    // 全スレッドのロードが完了するまで待機
     barrier();
 
     uint pout = 0;
     uint pin = 1;
 
-    // 2. Hillis-Steeleの並列スキャンアルゴリズム
-    // offsetを 1, 2, 4, 8... と倍々にしながら足し合わせていく
-    for (uint offset = 1; offset < gl_WorkGroupSize.x; offset *= 2) {
-        // ダブルバッファのインデックスをスワップ
+    for (uint offset = 1; offset < 1024; offset *= 2) {
         pout = 1 - pout;
         pin = 1 - pout;
 
         if (tid >= offset) {
-            // 自分より offset 個前の要素と足し合わせる
             sharedData[pout][tid] = sharedData[pin][tid] + sharedData[pin][tid - offset];
         } else {
-            // 足す相手がいない場合はそのままコピー
             sharedData[pout][tid] = sharedData[pin][tid];
         }
-        
-        // 次のステップに進む前に、全スレッドの書き込み完了を待つ
         barrier();
     }
 
-    // 3. 計算結果をグローバルメモリ(VRAM)に書き戻す
     if (gid < pc.elementCount) {
         buffers[pc.outputIndex].data[gid] = sharedData[pout][tid];
+    }
+
+    // 【追加】ワークグループの最後のスレッドが、そのブロックの合計値を書き出す
+    if (tid == 1023 && pc.blockSumIndex != 0xFFFFFFFF) {
+        buffers[pc.blockSumIndex].data[wid] = sharedData[pout][1023];
     }
 }

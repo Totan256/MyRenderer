@@ -138,7 +138,7 @@ namespace rhi::vk {
 
             node.resourceHandles.clear();
             node.requirements.clear();
-            std::set<ResourceHandle> seenHandles; // 重複排除用
+            std::map<ResourceHandle, rhi::ResourceUsage> aggregatedUsages; // 同一パス内の複数ディスパッチで同一リソースが異なるUsageでアクセスされている場合、Write系を優先して集約するためのマップ
 
             for (const auto& ds : node.dispatchStates) {
                 for (const auto& [offset, handle] : ds.resourceOffsets) {
@@ -148,17 +148,26 @@ namespace rhi::vk {
                     // todo: マルチディスパッチ時の競合チェック（同一リソースの読み書き衝突検知）はここに実装する
                     // ds（ディスパッチ）を跨いで同じ handle が isWriteUsage でアクセスされていないか等
 
-                    if (seenHandles.insert(handle).second) {
-                        node.resourceHandles.push_back(handle);
-                        node.requirements.push_back({offset, it->second, rhi::ShaderStage::Compute}); // Compute固定　todo他のstage
-                        
-                        // 基底クラスのソート機能のために producers / consumers を更新
+                    if (it == node.signature.end()) continue;
+
+                    if (aggregatedUsages.find(handle) == aggregatedUsages.end()) {
+                        aggregatedUsages[handle] = it->second;
+                    } else {
+                        // 既に登録済みでも、今回が Write 系なら昇格させる
                         if (isWriteUsage(it->second)) {
-                            m_resourceRegistry[handle].producers.push_back((uint32_t)passIndex);
-                        } else {
-                            m_resourceRegistry[handle].consumers.push_back((uint32_t)passIndex);
+                            aggregatedUsages[handle] = it->second;
                         }
                     }
+                }
+            }
+            for (const auto& [handle, usage] : aggregatedUsages) {
+                node.resourceHandles.push_back(handle);
+                node.requirements.push_back({0, usage, rhi::ShaderStage::Compute}); // バリア計算用なのでoffsetは0でOK
+
+                if (isWriteUsage(usage)) {
+                    m_resourceRegistry[handle].producers.push_back((uint32_t)passIndex);
+                } else {
+                    m_resourceRegistry[handle].consumers.push_back((uint32_t)passIndex);
                 }
             }
         }
