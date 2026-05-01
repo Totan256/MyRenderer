@@ -18,8 +18,8 @@ public:
     }
 
     // レンダリングの実行
-    void render(float time);
-
+    // void render(float time);
+    void runFileParenthesesCheck(const std::string& filepath);
     // 結果保存
     //void saveResult(const std::string& filename, rhi::Buffer& stagingBuffer);
 

@@ -3,6 +3,12 @@
 #include "vulkan/VulkanDevice.hpp"
 #include <iostream>
 #include <cstddef>
+#include <vector>
+#include <chrono>
+#include <random>
+
+#include <fstream>
+#include <memory>
 
 struct ScanPushConstants {
     uint32_t inputIndex;
@@ -10,102 +16,141 @@ struct ScanPushConstants {
     uint32_t blockSumIndex;
     uint32_t elementCount;
 };
-
 struct AddPushConstants {
     uint32_t dataIndex;
     uint32_t blockSumIndex;
+    uint32_t errorFlagIndex;
     uint32_t elementCount;
 };
 
-void Renderer::render(float time) {
+void Renderer::runFileParenthesesCheck(const std::string& filepath) {
     auto& vkDevice = static_cast<rhi::vk::VulkanDevice&>(m_device);
 
-    // 最大 1024 * 1024 = 1,048,576 要素をテスト
-    const uint32_t ELEMENT_COUNT = 1024 * 1024; 
-    const uint32_t WORKGROUP_SIZE = 1024;
-    const uint32_t NUM_WORKGROUPS = (ELEMENT_COUNT + WORKGROUP_SIZE - 1) / WORKGROUP_SIZE; // = 1024
+    std::ifstream file(filepath, std::ios::ate | std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filepath << std::endl;
+        return;
+    }
+    size_t fileSize = file.tellg();
+    file.seekg(0);
+    std::string content(fileSize, '\0');
+    file.read(&content[0], fileSize);
 
-    size_t dataBufferSize = ELEMENT_COUNT * sizeof(uint32_t);
-    size_t blockSumBufferSize = NUM_WORKGROUPS * sizeof(uint32_t);
+    std::cout << "file size :" << fileSize << std::endl;
 
-    // 1. バッファの作成
-    rhi::vk::VulkanBuffer inputBuffer(vkDevice, vkDevice.getAllocator(), dataBufferSize,
+    // ディスパッチサイズ分で区切って必要なパスの数を計算
+    uint32_t baseElementCount = ((fileSize + 1023) / 1024) * 1024;
+    if (baseElementCount == 0) baseElementCount = 1024;
+    std::vector<int32_t> mappedData(baseElementCount, 0);
+    for (size_t i = 0; i < fileSize; ++i) {
+        if (content[i] == '(') mappedData[i] = 1;
+        else if (content[i] == ')') mappedData[i] = -1;
+    }
+    // ツリー構造の計算とバッファ確保
+    std::vector<uint32_t> levelSizes;
+    uint32_t curr = baseElementCount;
+    levelSizes.push_back(curr);
+    while (curr > 1) {
+        curr = (curr + 1023) / 1024;
+        levelSizes.push_back(curr);
+    }
+
+    std::vector<std::unique_ptr<rhi::vk::VulkanBuffer>> levelBuffers;
+    for (uint32_t size : levelSizes) {
+        levelBuffers.push_back(std::make_unique<rhi::vk::VulkanBuffer>(
+            vkDevice, vkDevice.getAllocator(), size * sizeof(int32_t),
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST));
+    }
+
+    // 初期データをlevel0に転送
+    void* mappedMem = levelBuffers[0]->map();
+    std::memcpy(mappedMem, mappedData.data(), baseElementCount * sizeof(int32_t));
+    levelBuffers[0]->unmap();
+
+    // 最小値格納バッファ
+    rhi::vk::VulkanBuffer errorFlagBuffer(
+        vkDevice, vkDevice.getAllocator(), sizeof(int32_t),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-    rhi::vk::VulkanBuffer outputBuffer(vkDevice, vkDevice.getAllocator(), dataBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-    rhi::vk::VulkanBuffer blockSumBuffer(vkDevice, vkDevice.getAllocator(), blockSumBufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    int32_t* flagMem = static_cast<int32_t*>(errorFlagBuffer.map());
+    *flagMem = 1;
+    errorFlagBuffer.unmap();
 
-    // 入力データの初期化（すべて 1 で埋める）
-    uint32_t* inData = static_cast<uint32_t*>(inputBuffer.map());
-    for(uint32_t i = 0; i < ELEMENT_COUNT; ++i) inData[i] = 1; 
-    inputBuffer.unmap();
 
-    // 2. RenderGraph の構築
     rhi::vk::VulkanRenderGraph graph(vkDevice);
     
-    auto hInput = graph.importResource(&inputBuffer);
-    auto hOutput = graph.importResource(&outputBuffer);
-    auto hBlockSum = graph.importResource(&blockSumBuffer);
+    std::vector<rhi::ResourceHandle> hLevels;
+    for (auto& buf : levelBuffers) {
+        hLevels.push_back(graph.importResource(buf.get()));
+    }
+    auto hErrorFlag = graph.importResource(&errorFlagBuffer);
 
-    // 各パスの要件定義
     auto& scanBindGroup = graph.createBindGroup({
         {offsetof(ScanPushConstants, inputIndex), rhi::ResourceUsage::StorageRead},
         {offsetof(ScanPushConstants, outputIndex), rhi::ResourceUsage::StorageWrite},
         {offsetof(ScanPushConstants, blockSumIndex), rhi::ResourceUsage::StorageWrite}
     });
-
     auto& addBindGroup = graph.createBindGroup({
-        {offsetof(AddPushConstants, dataIndex), rhi::ResourceUsage::StorageWrite}, // Write(Read/Write)
+        {offsetof(AddPushConstants, dataIndex), rhi::ResourceUsage::StorageWrite},
+        {offsetof(AddPushConstants, errorFlagIndex), rhi::ResourceUsage::StorageWrite},
         {offsetof(AddPushConstants, blockSumIndex), rhi::ResourceUsage::StorageRead}
     });
 
-    // --- Pass 1: ローカルスキャン ---
-    auto& pass1 = graph.addPass("LocalScan", "shaders/scan.comp").bind(scanBindGroup);
-    pass1.dispatch(NUM_WORKGROUPS, 1, 1)
-        .updateResource(offsetof(ScanPushConstants, inputIndex), hInput)
-        .updateResource(offsetof(ScanPushConstants, outputIndex), hOutput)
-        .updateResource(offsetof(ScanPushConstants, blockSumIndex), hBlockSum)
-        .updateConstant(offsetof(ScanPushConstants, elementCount), ELEMENT_COUNT);
+    int numLevels = levelSizes.size();
 
-    // --- Pass 2: ブロック合計値のスキャン ---
-    // blockSumBuffer 自身を入力かつ出力として扱う（In-placeスキャン）
-    auto& pass2 = graph.addPass("GlobalScan", "shaders/scan.comp").bind(scanBindGroup);
-    pass2.dispatch(1, 1, 1) // ブロック数は最大1024なので、1ワークグループで処理可能
-        .updateResource(offsetof(ScanPushConstants, inputIndex), hBlockSum)
-        .updateResource(offsetof(ScanPushConstants, outputIndex), hBlockSum)
-        .updateConstant(offsetof(ScanPushConstants, blockSumIndex), 0xFFFFFFFF) // これ以上の上の階層は作らない
-        .updateConstant(offsetof(ScanPushConstants, elementCount), NUM_WORKGROUPS);
+    for (int i = 0; i < numLevels - 1; ++i) {
+        uint32_t size = levelSizes[i];
+        uint32_t numWorkgroups = levelSizes[i + 1];
 
-    // --- Pass 3: オフセットの加算 ---
-    auto& pass3 = graph.addPass("AddOffset", "shaders/scan_add.comp").bind(addBindGroup);
-    pass3.dispatch(NUM_WORKGROUPS, 1, 1)
-        .updateResource(offsetof(AddPushConstants, dataIndex), hOutput)
-        .updateResource(offsetof(AddPushConstants, blockSumIndex), hBlockSum)
-        .updateConstant(offsetof(AddPushConstants, elementCount), ELEMENT_COUNT);
+        // 最後のスキャン階層だけblockSum不要
+        uint32_t nextBlockHandle = (i == numLevels - 2) ? 0xFFFFFFFF : hLevels[i + 1];
 
-    // コンパイル（ここで Pass1->Pass2->Pass3 間のバリアが自動生成される！）
+        graph.addPass("ScanLevel_" + std::to_string(i), "shaders/scan.comp").bind(scanBindGroup)
+            .dispatch(numWorkgroups, 1, 1)
+            .updateResource(offsetof(ScanPushConstants, inputIndex), hLevels[i])
+            .updateResource(offsetof(ScanPushConstants, outputIndex), hLevels[i])
+            .updateResource(offsetof(ScanPushConstants, blockSumIndex), nextBlockHandle)
+            .updateConstant(offsetof(ScanPushConstants, elementCount), size);
+    }
+    
+    for (int i = numLevels - 3; i >= 0; --i) {
+        uint32_t size = levelSizes[i];
+        uint32_t numWorkgroups = levelSizes[i + 1];
+
+        graph.addPass("AddLevel_" + std::to_string(i), "shaders/scan_add.comp").bind(addBindGroup)
+            .dispatch(numWorkgroups, 1, 1)
+            .updateResource(offsetof(AddPushConstants, dataIndex), hLevels[i])
+            .updateResource(offsetof(AddPushConstants, blockSumIndex), hLevels[i + 1])
+            .updateResource(offsetof(AddPushConstants, errorFlagIndex), hErrorFlag)
+            .updateConstant(offsetof(AddPushConstants, elementCount), size);
+    }
+
     graph.compile();
 
-    // 3. 実行
     rhi::vk::VulkanCommandList cmd(vkDevice);
     cmd.begin();
+    auto gpu_start = std::chrono::high_resolution_clock::now();
     graph.execute(cmd);
     cmd.end();
     cmd.submitAndWait();
+    auto gpu_end = std::chrono::high_resolution_clock::now();
+    double gpu_time = std::chrono::duration<double, std::milli>(gpu_end - gpu_start).count();
 
-    // 4. 結果の検証
-    uint32_t* outData = static_cast<uint32_t*>(outputBuffer.map());
+    int32_t* outData = static_cast<int32_t*>(levelBuffers[0]->map());
+    int32_t* finalFlag = static_cast<int32_t*>(errorFlagBuffer.map());
     
-    std::cout << "--- Huge Parallel Prefix Sum Results (" << ELEMENT_COUNT << " elements) ---" << std::endl;
-    std::cout << "First 10: ";
-    for(int i = 0; i < 10; ++i) std::cout << outData[i] << " ";
-    std::cout << std::endl;
-    
-    std::cout << "Last 3:   " 
-              << outData[ELEMENT_COUNT - 3] << " " 
-              << outData[ELEMENT_COUNT - 2] << " " 
-              << outData[ELEMENT_COUNT - 1] << std::endl;
-    
-    outputBuffer.unmap();
+    // 全要素が 0 以上かつ、最後の要素が 0 なら対応が取れている
+    bool isDropBelowZero = (*finalFlag == 0);
+    int finalSum = outData[fileSize - 1]; // 配列の最後尾だけ確認
+
+    if (!isDropBelowZero && finalSum == 0) {
+        std::cout << "Parentheses Check: VALID" << std::endl;
+    } else {
+        std::cout << "Parentheses Check: INVALID" << std::endl;
+    }
+
+    std::cout << " (Final Sum: " << outData[fileSize - 1] << ")" << std::endl;
+    std::cout << "GPU Time  : " << gpu_time << " ms" << std::endl;
+
+    levelBuffers[0]->unmap();
+    errorFlagBuffer.unmap();
 }

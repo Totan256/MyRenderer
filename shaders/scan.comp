@@ -11,18 +11,17 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(set = 0, binding = 0) buffer DataBuffer {
-    uint data[];
+    int data[];
 } buffers[];
 
-shared uint sharedData[2][1024];
+shared int sharedData[2][1024];
 
 void main() {
     uint tid = gl_LocalInvocationID.x;
     uint gid = gl_GlobalInvocationID.x;
     uint wid = gl_WorkGroupID.x;
 
-    // 範囲外は 0 として扱うことで、端数のブロックでも安全に計算できる
-    uint value = (gid < pc.elementCount) ? buffers[pc.inputIndex].data[gid] : 0;
+    int value = (gid < pc.elementCount) ? buffers[pc.inputIndex].data[gid] : 0;
     sharedData[0][tid] = value;
     barrier();
 
@@ -45,7 +44,6 @@ void main() {
         buffers[pc.outputIndex].data[gid] = sharedData[pout][tid];
     }
 
-    // 【追加】ワークグループの最後のスレッドが、そのブロックの合計値を書き出す
     if (tid == 1023 && pc.blockSumIndex != 0xFFFFFFFF) {
         buffers[pc.blockSumIndex].data[wid] = sharedData[pout][1023];
     }

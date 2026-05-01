@@ -6,11 +6,12 @@ layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 layout(push_constant) uniform PushConstants {
     uint dataIndex;
     uint blockSumIndex;
+    uint errorFlagIndex;
     uint elementCount;
 } pc;
 
 layout(set = 0, binding = 0) buffer DataBuffer {
-    uint data[];
+    int data[];
 } buffers[];
 
 void main() {
@@ -18,9 +19,17 @@ void main() {
     uint wid = gl_WorkGroupID.x;
 
     // ブロック0には足すものがないためスキップ
-    if (wid > 0 && gid < pc.elementCount) {
-        // 前のブロックまでの合計値（オフセット）を取得して加算
-        uint offset = buffers[pc.blockSumIndex].data[wid - 1];
-        buffers[pc.dataIndex].data[gid] += offset;
+    if (gid < pc.elementCount) {
+        int finalSum = buffers[pc.dataIndex].data[gid];
+        
+        if (wid > 0) {
+            int offset = buffers[pc.blockSumIndex].data[wid - 1];
+            finalSum += offset;
+            buffers[pc.dataIndex].data[gid] = finalSum;
+        }
+
+        if (finalSum < 0) {
+            atomicMin(buffers[pc.errorFlagIndex].data[0], 0);
+        }
     }
 }

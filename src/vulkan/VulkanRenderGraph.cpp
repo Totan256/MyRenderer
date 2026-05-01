@@ -142,6 +142,7 @@ namespace rhi::vk {
 
             for (const auto& ds : node.dispatchStates) {
                 for (const auto& [offset, handle] : ds.resourceOffsets) {
+                    if (handle == rhi::InvalidResource || handle == 0xFFFFFFFF) continue;
                     auto it = node.signature.find(offset);
                     // ここに到達した時点でシグネチャとの整合性は setResource で保証されている，はず
                     

@@ -1,0 +1,32 @@
+#version 450
+#extension GL_EXT_shader_8bit_storage : require
+
+layout (local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uint elementCount;
+} pc;
+
+layout(set = 0, binding = 0) readonly buffer TextBuffer {
+    uint8_t chars[];
+} inText;
+
+layout(set = 0, binding = 1) buffer DataBuffer {
+    int data[];
+} outData;
+
+void main() {
+    uint gid = gl_GlobalInvocationID.x;
+
+    if (gid < pc.elementCount) {
+        uint c = uint(inText.chars[gid]);
+        int val = 0;
+        if (c == 40u) {
+            val = 1;
+        } else if (c == 41u) {
+            val = -1;
+        }
+        
+        outData.data[gid] = val;
+    }
+}
