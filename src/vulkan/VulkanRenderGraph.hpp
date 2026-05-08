@@ -20,7 +20,6 @@ namespace rhi::vk {
     class VulkanRenderGraph : public RenderGraph {
     public:
         VulkanRenderGraph(VulkanDevice& device): m_device(device), m_resourceAllocator(device){
-            // Todo　漏れがないかチェック
         }    
 
         PassBuilder& addPass(const std::string& name, const std::string& shaderPath) override;
@@ -36,10 +35,6 @@ namespace rhi::vk {
 
         DispatchObject& createDispatch(LogicalPass& node, uint32_t x, uint32_t y, uint32_t z);
     private:
-        // std::vector<ResourceRegistration> m_resourceRegistry;
-        // std::vector<ResourceLifetime> m_resourceLifetimes;
-        // std::vector<VulkanCommandList> m_commandLists;
-
         std::vector<PhysicalNode> m_physicalNodes;
         std::vector<std::unique_ptr<PassBuilder>> m_builders;
         std::vector<std::unique_ptr<DispatchObject>> m_dispatchObjects;

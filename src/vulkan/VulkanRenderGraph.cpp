@@ -54,13 +54,6 @@ namespace rhi::vk {
     public:
         VulkanPassBuilder(VulkanRenderGraph& graph, LogicalPass& node) : m_graph(graph), m_node(node) {}
 
-        // PassBuilder& bindPipeline(VulkanComputePipeline& pipeline) override {
-        //     m_node.commands.push_back([&pipeline](VulkanCommandList& cmd) {
-        //         cmd.bindPipeline(pipeline);
-        //         cmd.bindGlobalDescriptorSet();
-        //     });
-        //     return *this;
-        // }
         PassBuilder& bind(const BindGroup& desc) override {
             for(const auto& entry : desc.requirements) {
                 m_node.signature[entry.offset] = entry.usage;

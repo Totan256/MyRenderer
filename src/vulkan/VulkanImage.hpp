@@ -4,7 +4,7 @@
 #include "VulkanDevice.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
-// #include "VulkanCommandList.hpp"
+
 namespace rhi::vk{
     class VulkanImage : public rhi::Resource {
     public:
@@ -13,9 +13,6 @@ namespace rhi::vk{
         // コピー禁止
         VulkanImage(const VulkanImage&) = delete;
         VulkanImage& operator=(const VulkanImage&) = delete;
-
-        // バッファに変換
-        //void copyToBuffer(VkCommandBuffer cmd, VkBuffer buffer);
 
         VkImage getImage() const {return m_image;}
         VkImageView getView() const {return m_view;}

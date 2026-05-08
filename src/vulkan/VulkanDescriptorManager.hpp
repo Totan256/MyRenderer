@@ -86,7 +86,7 @@ namespace rhi::vk {
                 write.dstBinding = binding;
                 write.descriptorType = type;
                 write.descriptorCount = 1;
-                // ポインタ保持のためlistに追加 (m_imageInfosメンバ変数をlist<VkDescriptorImageInfo>型で追加してください)
+                // TODOポインタ保持のためlistに追加 (m_imageInfosメンバ変数をlist<VkDescriptorImageInfo>型で追加してください)
                 write.pImageInfo = &m_imageInfos.emplace_back(imageInfo); 
 
                 m_writes.push_back(write);

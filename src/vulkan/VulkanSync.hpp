@@ -10,9 +10,7 @@ namespace rhi::vk{
         VkImageLayout         layout;
     };
 
-    /**
-     * RHIのShaderStageをVulkanのPipelineStageFlags2に変換する
-     */
+    // RHIのShaderStageをVulkanのPipelineStageFlags2に変換する
     inline VkPipelineStageFlags2 MapToVulkanStage(rhi::ShaderStage stage) {
         if (stage == rhi::ShaderStage::All) return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
         

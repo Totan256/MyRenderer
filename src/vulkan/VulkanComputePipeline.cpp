@@ -25,9 +25,6 @@ namespace rhi::vk{
         if (m_shaderModule != VK_NULL_HANDLE) {
             vkDestroyShaderModule(device, m_shaderModule, nullptr);
         }
-        // if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        //     vkDestroyDescriptorSetLayout(device, m_descriptorSetLayout, nullptr);
-        // }
     }
 
     void VulkanComputePipeline::createDescriptorSetLayout() {
@@ -53,11 +50,6 @@ namespace rhi::vk{
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         layoutInfo.pBindings = bindings.data();
-
-        // if(vkCreateDescriptorSetLayout(m_device.getDevice(), &layoutInfo,
-        //         nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
-        //     throw std::runtime_error("failed to create descriptor set layout!");
-        // }
     }
 
     void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {
