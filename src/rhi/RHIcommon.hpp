@@ -1,12 +1,24 @@
 ﻿#pragma once
 
 namespace rhi {
-    enum class BufferUsage {
-        VertexBuffer,
-        IndexBuffer,
-        UniformBuffer,
-        StorageBuffer
+    enum class BufferUsageFlags : uint32_t {
+        None          = 0,
+        TransferSrc   = 1 << 0,
+        TransferDst   = 1 << 1,
+        UniformBuffer = 1 << 2,
+        StorageBuffer = 1 << 3,
+        VertexBuffer  = 1 << 4,
+        IndexBuffer   = 1 << 5,
     };
+    inline BufferUsageFlags operator|(BufferUsageFlags a, BufferUsageFlags b) {
+        return static_cast<BufferUsageFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+    inline BufferUsageFlags operator&(BufferUsageFlags a, BufferUsageFlags b) {
+        return static_cast<BufferUsageFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    }
+    inline bool operator==(BufferUsageFlags a, BufferUsageFlags b) {
+        return (static_cast<uint32_t>(a) == static_cast<uint32_t>(b));
+    }
 
     enum class Format {
         R8G8B8A8_Unorm,
@@ -16,7 +28,7 @@ namespace rhi {
 
     struct BufferDesc {
         size_t size = 0;
-        uint32_t usageFlags = 0;
+        BufferUsageFlags usageFlags = BufferUsageFlags::None;
         bool isCpuVisible = false;// CPUからアクセス可能か（StagingBufferなどの用途）
         
         bool isCompatible(const BufferDesc& other) const {

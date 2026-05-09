@@ -9,6 +9,7 @@
 #include "VulkanConstantBufferManager.hpp"
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
+#include "rhi/CommandList.hpp"
 #include <map>
 #include <deque>
 namespace rhi::vk {
@@ -31,7 +32,7 @@ namespace rhi::vk {
         // バリア決定アルゴリズム
         void compile() override;
 
-        void execute(CommandList& cmd) override;
+        void execute(rhi::CommandList& cmd) override;
 
         DispatchObject& createDispatch(LogicalPass& node, uint32_t x, uint32_t y, uint32_t z);
     private:

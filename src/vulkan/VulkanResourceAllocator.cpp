@@ -1,5 +1,6 @@
 ﻿#include "VulkanResourceAllocator.hpp"
 #include "VulkanImage.hpp"
+#include "VulkanSync.hpp"
 #include "VulkanBuffer.hpp"
 #include <algorithm>
 
@@ -71,16 +72,13 @@ namespace rhi::vk{
                 }
 
                 if (!assignedBuffer) {
-                    VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-                    if (bufferDesc->usageFlags & (uint32_t)rhi::ResourceUsage::ConstantBuffer) {
-                        usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-                    } else {
-                        usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-                    }
+                    VkBufferUsageFlags vkUsage = mapBufferUsage(bufferDesc->usageFlags);
                     auto newBuf = std::make_unique<VulkanBuffer>(
-                        m_device, m_device.getAllocator(), bufferDesc->size,
-                        usage,
-                        VMA_MEMORY_USAGE_AUTO
+                        m_device, 
+                        m_device.getAllocator(), 
+                        bufferDesc->size,
+                        vkUsage,                  // 変換したフラグを渡す
+                        bufferDesc->isCpuVisible ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
                     );
                     assignedBuffer = newBuf.get();
                     m_bufferPool.push_back({ std::move(newBuf), life.lastPass });

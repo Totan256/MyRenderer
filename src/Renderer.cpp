@@ -1,7 +1,7 @@
 ﻿#include "Renderer.hpp"
-#include "vulkan/VulkanRenderGraph.hpp"
 #include "vulkan/VulkanDevice.hpp"
 #include "RenderGraph.hpp"
+#include "CommandList.hpp"
 #include <iostream>
 #include <cstddef>
 #include <vector>
@@ -19,24 +19,21 @@ void Renderer::render(float time) {
     size_t bufferSize = ELEMENT_COUNT * sizeof(uint32_t);
 
     // 1. 入出力バッファの作成
-    //auto& inputBuffer = m_device.createBuffer(rhi::BufferDesc);
-    rhi::vk::VulkanBuffer inputBuffer(vkDevice, vkDevice.getAllocator(), bufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
-    rhi::vk::VulkanBuffer outputBuffer(vkDevice, vkDevice.getAllocator(), bufferSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
+    auto inputBuffer = m_device.createBuffer({bufferSize, rhi::BufferUsageFlags::StorageBuffer, true});
+    auto outputBuffer = m_device.createBuffer({bufferSize, rhi::BufferUsageFlags::StorageBuffer, true});
 
     // 入力データの初期化（すべて 1 で埋める）
-    uint32_t* inData = static_cast<uint32_t*>(inputBuffer.map());
+    uint32_t* inData = static_cast<uint32_t*>(inputBuffer->map());
     for(uint32_t i = 0; i < ELEMENT_COUNT; ++i) {
         inData[i] = 1; 
     }
-    inputBuffer.unmap();
+    inputBuffer->unmap();
 
     // 2. RenderGraph の構築
     auto graph = m_device.createRenderGraph();
     
-    auto hInput = graph->importResource(&inputBuffer);
-    auto hOutput = graph->importResource(&outputBuffer);
+    auto hInput = graph->importResource(inputBuffer.get());
+    auto hOutput = graph->importResource(outputBuffer.get());
 
     auto& bindGroup = graph->createBindGroup({
         {offsetof(ScanPushConstants, inputIndex), rhi::ResourceUsage::StorageRead},
@@ -55,14 +52,14 @@ void Renderer::render(float time) {
     graph->compile();
 
     // 3. 実行
-    rhi::vk::VulkanCommandList cmd(vkDevice);
-    cmd.begin();
-    graph->execute(cmd);
-    cmd.end();
-    cmd.submitAndWait(); // 同期的に待機
+    auto cmd = m_device.createCommandList();
+    cmd->begin();
+    graph->execute(*cmd);
+    cmd->end();
+    cmd->submitAndWait(); // 同期的に待機
 
     // 4. 結果の検証
-    uint32_t* outData = static_cast<uint32_t*>(outputBuffer.map());
+    uint32_t* outData = static_cast<uint32_t*>(outputBuffer->map());
     
     std::cout << "--- Parallel Prefix Sum Results ---" << std::endl;
     std::cout << "First 10 elements: ";
@@ -74,5 +71,5 @@ void Renderer::render(float time) {
               << outData[ELEMENT_COUNT - 2] << " " 
               << outData[ELEMENT_COUNT - 1] << std::endl;
     
-    outputBuffer.unmap();
+    outputBuffer->unmap();
 }

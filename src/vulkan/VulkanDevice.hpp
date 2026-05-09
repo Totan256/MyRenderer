@@ -25,7 +25,7 @@ namespace rhi::vk{
 
     class VulkanDevice : public rhi::Device {
     public:
-        VulkanDevice() = default;
+        VulkanDevice();
         ~VulkanDevice() override;
 
         // コピー禁止
@@ -46,6 +46,8 @@ namespace rhi::vk{
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<Image> createImage(const ImageDesc& desc) override;
         std::unique_ptr<RenderGraph> createRenderGraph() override;
+        std::unique_ptr<rhi::CommandList> createCommandList() override;
+        
 
         // 生のハンドル取得（拡張性のため）
         VkDevice getDevice() const { return m_device; }

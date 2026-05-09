@@ -10,6 +10,7 @@
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 #include "rhi/Resource.hpp"
+#include "rhi/CommandList.hpp"
 
 namespace rhi {
     using ResourceHandle = uint32_t;

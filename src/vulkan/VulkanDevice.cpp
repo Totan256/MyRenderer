@@ -20,6 +20,8 @@ namespace rhi::vk{
         }
     }
 
+    VulkanDevice::VulkanDevice() = default;
+
     void VulkanDevice::endFrame() {
         m_frameCounter++;
     }
@@ -30,12 +32,9 @@ namespace rhi::vk{
     }
     
     std::unique_ptr<rhi::Buffer> VulkanDevice::createBuffer(const rhi::BufferDesc& desc) {
-        VkBufferUsageFlags vkUsage = 0;
-        // 簡易的なマッピングロジック (本来は RHIcommon のフラグから詳細に判定)
-        vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        
-        VmaMemoryUsage memUsage = desc.isCpuVisible ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-        
+        VkBufferUsageFlags vkUsage = mapBufferUsage(desc.usageFlags);
+        VmaMemoryUsage memUsage = desc.isCpuVisible ? 
+            VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
         return std::make_unique<VulkanBuffer>(*this, m_allocator, desc.size, vkUsage, memUsage);
     }
 
@@ -45,6 +44,9 @@ namespace rhi::vk{
 
     std::unique_ptr<RenderGraph> VulkanDevice::createRenderGraph(){
         return std::make_unique<VulkanRenderGraph>(*this);
+    }
+    std::unique_ptr<rhi::CommandList> VulkanDevice::createCommandList() {
+        return std::make_unique<VulkanCommandList>(*this);
     }
 
     void VulkanDevice::initialize(){

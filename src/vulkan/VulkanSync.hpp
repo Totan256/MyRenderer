@@ -3,6 +3,16 @@
 #include "rhi/RHIcommon.hpp"
 
 namespace rhi::vk{
+    inline VkBufferUsageFlags mapBufferUsage(rhi::BufferUsageFlags flags) {
+        VkBufferUsageFlags vkFlags = 0;
+        if (flags == rhi::BufferUsageFlags::TransferSrc)   vkFlags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if (flags == rhi::BufferUsageFlags::TransferDst)   vkFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        if (flags == rhi::BufferUsageFlags::UniformBuffer) vkFlags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if (flags == rhi::BufferUsageFlags::StorageBuffer) vkFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (flags == rhi::BufferUsageFlags::VertexBuffer)  vkFlags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        if (flags == rhi::BufferUsageFlags::IndexBuffer)   vkFlags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        return vkFlags;
+    }
     
     struct VulkanResourceState {
         VkPipelineStageFlags2 stageMask;

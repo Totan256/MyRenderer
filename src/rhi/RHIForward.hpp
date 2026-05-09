@@ -22,7 +22,7 @@ namespace rhi {
     // using Device = vk::VulkanDevice;
     // using Buffer = vk::VulkanBuffer;
     // using Image = vk::VulkanImage;
-    using CommandList = vk::VulkanCommandList;
+    // using CommandList = vk::VulkanCommandList;
     using ComputePipeline = vk::VulkanComputePipeline;
     // using RenderGraph = vk::VulkanRenderGraph;
 #elif defined(RHI_USE_DX12)

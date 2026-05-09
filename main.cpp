@@ -1,26 +1,16 @@
-﻿
+﻿// main.cpp
 #include <iostream>
-#include <cmath>
-#include <glm/glm.hpp>
-
 #include "rhi/RHI.hpp"
-
 #include "Renderer.hpp"
-#include "ImageExporter.hpp"
-
 
 int main() {
     try {
-        rhi::vk::VulkanDevice device;
-        device.initialize();
+        std::unique_ptr<rhi::Device> device = rhi::createDevice(rhi::GraphicsAPI::Vulkan);
 
-        // レンダラの作成
-        Renderer renderer(device, 800, 600);
+        Renderer renderer(*device, 800, 600);
 
-        // 実行と保存
         std::cout << "Rendering..." << std::endl;
-        renderer.render(1.5f); // 1.5秒時点の絵を描画
-        //renderer.saveResult("output_refactored.png");
+        renderer.render(1.5f);
 
         std::cout << "Success!" << std::endl;
 

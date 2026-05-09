@@ -6,20 +6,21 @@
 #include "VulkanComputePipeline.hpp"
 #include "VulkanBuffer.hpp"
 #include "VulkanImage.hpp"
+#include "CommandList.hpp"
 
 namespace rhi::vk{
 
-    class VulkanCommandList {
+    class VulkanCommandList : public CommandList {
     public:
         VulkanCommandList(VulkanDevice& device);
-        ~VulkanCommandList();
+        ~VulkanCommandList() override;
         
         // コマンド記録の開始と終了
-        void begin();
-        void end();
+        void begin() override;
+        void end() override;
 
         // コマンドの送信と完了待機（オフラインレンダリング用）
-        void submitAndWait();
+        void submitAndWait() override;
 
         // --- コマンド記録用メソッド ---
         
