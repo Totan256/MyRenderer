@@ -4,13 +4,12 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <mutex>
-#include <vector>
-#include <string>
-#include <iomanip>
-#include <iostream>
-#include <stdexcept>
-#include <algorithm>
+#include <deque>
+#include <functional>
 #include <optional>
+#include "rhi/Device.hpp"
+#include "rhi/Resource.hpp"
+#include "RenderGraph.hpp"
 namespace rhi::vk{
     class ConstantBufferManager; // 前方宣言
 
@@ -24,17 +23,29 @@ namespace rhi::vk{
             } \
         } while (0)
 
-    class VulkanDevice {
+    class VulkanDevice : public rhi::Device {
     public:
         VulkanDevice() = default;
-        ~VulkanDevice();
+        ~VulkanDevice() override;
 
         // コピー禁止
         VulkanDevice(const VulkanDevice&) = delete;
         VulkanDevice& operator=(const VulkanDevice&) = delete;
 
-        // 初期化（失敗したら例外を投げる）
-        void initialize();
+        // 初期化
+        void initialize() override;
+
+        // フレーム管理
+        void beginFrame() override;
+        void endFrame() override;
+        uint64_t getCurrentFrame() const override { return m_frameCounter; }
+
+        // 削除キュー
+        void enqueueDeletion(std::function<void()>&& deletionFunc) override;
+
+        std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
+        std::unique_ptr<Image> createImage(const ImageDesc& desc) override;
+        std::unique_ptr<RenderGraph> createRenderGraph() override;
 
         // 生のハンドル取得（拡張性のため）
         VkDevice getDevice() const { return m_device; }
@@ -60,6 +71,11 @@ namespace rhi::vk{
         void unregisterIndex(uint32_t index);
 
     private:
+        struct DeletionEntry {
+            uint64_t targetFrame;
+            std::function<void()> func;
+        };
+
         VkInstance m_instance = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE; // デバッグ用
         VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -79,6 +95,10 @@ namespace rhi::vk{
         std::mutex m_indexMutex;            // スレッド安全のため
 
         const uint32_t MAX_BINDLESS_RESOURCES = 100000;
+
+        uint64_t m_frameCounter = 0;
+        std::deque<DeletionEntry> m_deletionQueue;
+        std::mutex m_deletionMutex;
         
         void createBindlessResources(); // 初期化時に呼ぶ
 

@@ -9,6 +9,7 @@
 #include <memory>
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
+#include "rhi/Resource.hpp"
 
 namespace rhi {
     using ResourceHandle = uint32_t;
@@ -57,12 +58,12 @@ namespace rhi {
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
         bool isImage() const {
             if (isImported && physicalResource) {
-            return physicalResource->isImage();
+                return physicalResource->isImage();
+            }
+            return std::holds_alternative<ImageDesc>(desc);
         }
-        return std::holds_alternative<ImageDesc>(desc);
-    }
         
-        Resource* physicalResource = nullptr; // import用
+        rhi::Resource* physicalResource = nullptr; // import用
         bool isImported = false;
         
         // 依存関係解析用

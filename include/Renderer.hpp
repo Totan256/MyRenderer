@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "rhi/RHIForward.hpp"
+#include "rhi/Device.hpp"
 #include <memory>
 #include <vector>
 #include <string>

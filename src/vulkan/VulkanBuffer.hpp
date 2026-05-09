@@ -7,7 +7,7 @@
 #include "RHIcommon.hpp"
 
 namespace rhi::vk{
-    class VulkanBuffer : public rhi::Resource {
+    class VulkanBuffer : public rhi::Buffer {
     public:
         VulkanBuffer(VulkanDevice& device, VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
         
@@ -25,8 +25,8 @@ namespace rhi::vk{
         VkDeviceSize getSize() const { return m_desc.size; }
         VmaAllocation getAllocation() const { return m_allocation; } 
 
-        void* map();
-        void unmap();
+        void* map() override;
+        void unmap() override;
 
         uint32_t getBindlessIndex() const { return m_bindlessIndex; }
 

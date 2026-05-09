@@ -1,10 +1,52 @@
 ﻿#include "VulkanDevice.hpp"
+#include "VulkanBuffer.hpp"
+#include "VulkanImage.hpp"
+
+#include "rhi/Resource.hpp"
+#include "RenderGraph.hpp"
+#include "VulkanRenderGraph.hpp"
 #include "VulkanConstantBufferManager.hpp"
+#include <iostream>
 
 
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 namespace rhi::vk{
+    void VulkanDevice::beginFrame() {
+        std::lock_guard<std::mutex> lock(m_deletionMutex);
+        while (!m_deletionQueue.empty() && m_deletionQueue.front().targetFrame <= m_frameCounter) {
+            m_deletionQueue.front().func();
+            m_deletionQueue.pop_front();
+        }
+    }
+
+    void VulkanDevice::endFrame() {
+        m_frameCounter++;
+    }
+
+    void VulkanDevice::enqueueDeletion(std::function<void()>&& deletionFunc) {
+        std::lock_guard<std::mutex> lock(m_deletionMutex);
+        m_deletionQueue.push_back({ m_frameCounter + MAX_FRAMES_IN_FLIGHT, std::move(deletionFunc) });
+    }
+    
+    std::unique_ptr<rhi::Buffer> VulkanDevice::createBuffer(const rhi::BufferDesc& desc) {
+        VkBufferUsageFlags vkUsage = 0;
+        // 簡易的なマッピングロジック (本来は RHIcommon のフラグから詳細に判定)
+        vkUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        
+        VmaMemoryUsage memUsage = desc.isCpuVisible ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+        
+        return std::make_unique<VulkanBuffer>(*this, m_allocator, desc.size, vkUsage, memUsage);
+    }
+
+    std::unique_ptr<rhi::Image> VulkanDevice::createImage(const rhi::ImageDesc& desc) {
+        return std::make_unique<VulkanImage>(*this, desc.width, desc.height);
+    }
+
+    std::unique_ptr<RenderGraph> VulkanDevice::createRenderGraph(){
+        return std::make_unique<VulkanRenderGraph>(*this);
+    }
+
     void VulkanDevice::initialize(){
         std::cout << "--- Initializing VulkanDevice ---" << std::endl;
         // ヘルパー関数の呼び出し。VK_CHECKが失敗時に例外を投げるため、安全に処理できます。
@@ -195,38 +237,17 @@ namespace rhi::vk{
     }
 
 
-    VulkanDevice::~VulkanDevice(){    
+    VulkanDevice::~VulkanDevice(){
         m_constantBufferManager.reset();
-        // 論理デバイスの解放
-        if (m_device != VK_NULL_HANDLE) {
-            if (m_bindlessLayout != VK_NULL_HANDLE) {
-                vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
-            }
-            if (m_bindlessPool != VK_NULL_HANDLE) {
-                vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
-            }
-            
-            // VMAアロケータやデバイス自体の破棄はその後
-            if (m_allocator != VK_NULL_HANDLE) {
-                vmaDestroyAllocator(m_allocator);
-            }
-            
-            vkDestroyDevice(m_device, nullptr);
-            
-        }
-        
-        // インスタンスの解放
-        if (m_instance != VK_NULL_HANDLE) {
-            // デバッグメッセンジャーの破棄（もしあれば）
-            if (m_debugMessenger != VK_NULL_HANDLE) {
-                // vkDestroyDebugUtilsMessengerEXTは拡張関数なので、手動で取得が必要
-                auto func = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(m_instance, "vkDestroyDebugUtilsMessengerEXT");
-                if (func != nullptr) {
-                    func(m_instance, m_debugMessenger, nullptr);
-                }
-            }
-            vkDestroyInstance(m_instance, nullptr);
-        }
+        // すべてのリソースが解放されるのを待機
+        m_frameCounter += MAX_FRAMES_IN_FLIGHT + 1;
+        beginFrame();
+
+        if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
+        if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
+        if (m_allocator) vmaDestroyAllocator(m_allocator);
+        if (m_device) vkDestroyDevice(m_device, nullptr);
+        if (m_instance) vkDestroyInstance(m_instance, nullptr);
         std::cout << "VulkanDevice destroyed." << std::endl;
     }
 

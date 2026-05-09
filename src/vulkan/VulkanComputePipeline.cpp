@@ -114,6 +114,7 @@ namespace rhi::vk{
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
+            std::cerr << "[Error] Could not open shader file: " << filename << std::endl;
             throw std::runtime_error("failed to open file: " + filename);
         }
 

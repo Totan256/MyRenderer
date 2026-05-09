@@ -11,7 +11,7 @@
 
 int main() {
     try {
-        rhi::Device device;
+        rhi::vk::VulkanDevice device;
         device.initialize();
 
         // レンダラの作成

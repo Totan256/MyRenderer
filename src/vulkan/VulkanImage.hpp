@@ -6,7 +6,7 @@
 #include "RHIForward.hpp"
 
 namespace rhi::vk{
-    class VulkanImage : public rhi::Resource {
+    class VulkanImage : public rhi::Image {
     public:
         VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height);
         ~VulkanImage() override;
@@ -16,7 +16,7 @@ namespace rhi::vk{
 
         VkImage getImage() const {return m_image;}
         VkImageView getView() const {return m_view;}
-        uint32_t getBindlessIndex() const { return m_bindlessIndex; }
+        uint32_t getBindlessIndex() const override { return m_bindlessIndex; }
 
         rhi::ResourceUsage getCurrentUsage() const override { return m_usage; }
         rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
@@ -39,7 +39,7 @@ namespace rhi::vk{
         rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
 
-        uint32_t m_bindlessIndex;
+        uint32_t m_bindlessIndex = 0;
     };
 
 }

@@ -54,15 +54,19 @@ namespace rhi::vk {
     }
 
     VulkanBuffer::~VulkanBuffer() {
-        // メモリとバッファを解放
-        if (m_buffer != VK_NULL_HANDLE) {
-            m_device.unregisterIndex(m_bindlessIndex);
-            
-            unmap();
-        }
-        if (m_buffer != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
-        }
+        // 重要: 生のハンドルをコピーしてクロージャに渡す
+        VkBuffer buffer = m_buffer;
+        VmaAllocation alloc = m_allocation;
+        VmaAllocator allocator = m_allocator;
+        uint32_t bindlessIdx = m_bindlessIndex;
+        auto& device = m_device;
+
+        m_device.enqueueDeletion([buffer, alloc, allocator, bindlessIdx, &device]() {
+            if (buffer != VK_NULL_HANDLE) {
+                device.unregisterIndex(bindlessIdx);
+                vmaDestroyBuffer(allocator, buffer, alloc);
+            }
+        });
     }
 
     void VulkanBuffer::writeData(const void* data, size_t dataSize) {

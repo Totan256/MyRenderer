@@ -1,6 +1,7 @@
 ﻿#include "Renderer.hpp"
 #include "vulkan/VulkanRenderGraph.hpp"
 #include "vulkan/VulkanDevice.hpp"
+#include "RenderGraph.hpp"
 #include <iostream>
 #include <cstddef>
 #include <vector>
@@ -18,6 +19,7 @@ void Renderer::render(float time) {
     size_t bufferSize = ELEMENT_COUNT * sizeof(uint32_t);
 
     // 1. 入出力バッファの作成
+    //auto& inputBuffer = m_device.createBuffer(rhi::BufferDesc);
     rhi::vk::VulkanBuffer inputBuffer(vkDevice, vkDevice.getAllocator(), bufferSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST);
     rhi::vk::VulkanBuffer outputBuffer(vkDevice, vkDevice.getAllocator(), bufferSize,
@@ -31,17 +33,17 @@ void Renderer::render(float time) {
     inputBuffer.unmap();
 
     // 2. RenderGraph の構築
-    rhi::vk::VulkanRenderGraph graph(vkDevice);
+    auto graph = m_device.createRenderGraph();
     
-    auto hInput = graph.importResource(&inputBuffer);
-    auto hOutput = graph.importResource(&outputBuffer);
+    auto hInput = graph->importResource(&inputBuffer);
+    auto hOutput = graph->importResource(&outputBuffer);
 
-    auto& bindGroup = graph.createBindGroup({
+    auto& bindGroup = graph->createBindGroup({
         {offsetof(ScanPushConstants, inputIndex), rhi::ResourceUsage::StorageRead},
         {offsetof(ScanPushConstants, outputIndex), rhi::ResourceUsage::StorageWrite}
     });
 
-    auto& scanPass = graph.addPass("PrefixSum", "shaders/scan.comp")
+    auto& scanPass = graph->addPass("PrefixSum", "shaders/scan.comp")
         .bind(bindGroup);
 
     // 1024要素なので、ディスパッチは x=1 (1ワークグループのみ)
@@ -50,12 +52,12 @@ void Renderer::render(float time) {
         .updateResource(offsetof(ScanPushConstants, outputIndex), hOutput)
         .updateConstant(offsetof(ScanPushConstants, elementCount), ELEMENT_COUNT);
 
-    graph.compile();
+    graph->compile();
 
     // 3. 実行
     rhi::vk::VulkanCommandList cmd(vkDevice);
     cmd.begin();
-    graph.execute(cmd);
+    graph->execute(cmd);
     cmd.end();
     cmd.submitAndWait(); // 同期的に待機
 

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <numeric>
 #include <stdexcept>
+#include <iostream>
 
 namespace rhi::vk {
     class VulkanDispatchObject : public DispatchObject {

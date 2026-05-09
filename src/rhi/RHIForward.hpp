@@ -1,10 +1,16 @@
-// src/rhi/RHIForward.hpp
+﻿// src/rhi/RHIForward.hpp
 #pragma once
 #include "RHIconfig.hpp"
 
 namespace rhi {
 #if defined(RHI_USE_VULKAN)
-    namespace vk{
+    class Resource;
+    class Buffer;
+    class Image;
+    class Device;
+    
+    // Vulkan実装側の前方宣言
+    namespace vk {
         class VulkanDevice;
         class VulkanBuffer;
         class VulkanImage;
@@ -13,9 +19,9 @@ namespace rhi {
         class VulkanRenderGraph;
     }
 
-    using Device = vk::VulkanDevice;
-    using Buffer = vk::VulkanBuffer;
-    using Image = vk::VulkanImage;
+    // using Device = vk::VulkanDevice;
+    // using Buffer = vk::VulkanBuffer;
+    // using Image = vk::VulkanImage;
     using CommandList = vk::VulkanCommandList;
     using ComputePipeline = vk::VulkanComputePipeline;
     // using RenderGraph = vk::VulkanRenderGraph;

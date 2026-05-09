@@ -57,12 +57,20 @@ namespace rhi::vk{
     }
 
     VulkanImage::~VulkanImage(){
-        if (m_view != VK_NULL_HANDLE) {
-            m_device.unregisterIndex(m_bindlessIndex);
-            vkDestroyImageView(m_device.getDevice(), m_view, nullptr);
-        }
-        if (m_image != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
-            vmaDestroyImage(m_device.getAllocator(), m_image, m_allocation);
-        }
+        VkImage image = m_image;
+        VkImageView view = m_view;
+        VmaAllocation alloc = m_allocation;
+        uint32_t bindlessIdx = m_bindlessIndex;
+        
+        // デバイスの参照をキャプチャし、遅延破棄を登録
+        m_device.enqueueDeletion([&device = m_device, image, view, alloc, bindlessIdx]() {
+            if (view != VK_NULL_HANDLE) {
+                device.unregisterIndex(bindlessIdx);
+                vkDestroyImageView(device.getDevice(), view, nullptr);
+            }
+            if (image != VK_NULL_HANDLE) {
+                vmaDestroyImage(device.getAllocator(), image, alloc);
+            }
+        });
     }
 }
