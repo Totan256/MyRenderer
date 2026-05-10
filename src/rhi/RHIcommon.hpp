@@ -19,6 +19,24 @@ namespace rhi {
     inline bool operator==(BufferUsageFlags a, BufferUsageFlags b) {
         return (static_cast<uint32_t>(a) == static_cast<uint32_t>(b));
     }
+    enum class ImageUsageFlags : uint32_t {
+        None                   = 0,
+        TransferSrc            = 1 << 0,
+        TransferDst            = 1 << 1,
+        Sampled                = 1 << 2, // シェーダーでテクスチャとして読み込む用
+        Storage                = 1 << 3, // ComputeShader等で読み書きする用 (UAV)
+        ColorAttachment        = 1 << 4, // カラーレンダーターゲット用
+        DepthStencilAttachment = 1 << 5, // 深度ステンシル用
+    };
+    inline ImageUsageFlags operator|(ImageUsageFlags a, ImageUsageFlags b) {
+        return static_cast<ImageUsageFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    }
+    inline ImageUsageFlags operator&(ImageUsageFlags a, ImageUsageFlags b) {
+        return static_cast<ImageUsageFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    }
+    inline bool operator==(ImageUsageFlags a, ImageUsageFlags b) {
+        return (static_cast<uint32_t>(a) == static_cast<uint32_t>(b));
+    }
 
     enum class Format {
         R8G8B8A8_Unorm,
@@ -42,7 +60,7 @@ namespace rhi {
         uint32_t width = 1; uint32_t height = 1; uint32_t depth = 1;
         uint32_t mipLevels = 1; uint32_t arrayLayers = 1;
         Format format = Format::R8G8B8A8_Unorm;
-        uint32_t usageFlags = 0;
+        ImageUsageFlags usageFlags = ImageUsageFlags::None;
 
         bool isCompatible(const ImageDesc& other) const {
             return width == other.width &&

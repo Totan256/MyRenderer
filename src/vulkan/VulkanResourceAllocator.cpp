@@ -53,7 +53,8 @@ namespace rhi::vk{
                     }
                 }
                 if (!assignedImage) {// 見つからなければ新規作成
-                    auto newImg = std::make_unique<VulkanImage>(m_device, imgDesc->width, imgDesc->height);
+                    VkImageUsageFlags vkUsage = mapImageUsage(imgDesc->usageFlags);
+                    auto newImg = std::make_unique<VulkanImage>(m_device, *imgDesc, vkUsage);
                     assignedImage = newImg.get();
                     m_imagePool.push_back({ std::move(newImg), life.lastPass });
                 }

@@ -5,12 +5,39 @@
 namespace rhi::vk{
     inline VkBufferUsageFlags mapBufferUsage(rhi::BufferUsageFlags flags) {
         VkBufferUsageFlags vkFlags = 0;
-        if (flags == rhi::BufferUsageFlags::TransferSrc)   vkFlags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        if (flags == rhi::BufferUsageFlags::TransferDst)   vkFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        if (flags == rhi::BufferUsageFlags::UniformBuffer) vkFlags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        if (flags == rhi::BufferUsageFlags::StorageBuffer) vkFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (flags == rhi::BufferUsageFlags::VertexBuffer)  vkFlags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        if (flags == rhi::BufferUsageFlags::IndexBuffer)   vkFlags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+        if ((flags & rhi::BufferUsageFlags::TransferSrc) != rhi::BufferUsageFlags::None)   
+            vkFlags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if ((flags & rhi::BufferUsageFlags::TransferDst) != rhi::BufferUsageFlags::None)   
+            vkFlags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        if ((flags & rhi::BufferUsageFlags::UniformBuffer) != rhi::BufferUsageFlags::None) 
+            vkFlags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if ((flags & rhi::BufferUsageFlags::StorageBuffer) != rhi::BufferUsageFlags::None) 
+            vkFlags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if ((flags & rhi::BufferUsageFlags::VertexBuffer) != rhi::BufferUsageFlags::None)  
+            vkFlags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        if ((flags & rhi::BufferUsageFlags::IndexBuffer) != rhi::BufferUsageFlags::None)   
+            vkFlags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+        return vkFlags;
+    }
+
+    inline VkImageUsageFlags mapImageUsage(rhi::ImageUsageFlags flags) {
+        VkImageUsageFlags vkFlags = 0;
+        
+        if ((flags & rhi::ImageUsageFlags::TransferSrc) != rhi::ImageUsageFlags::None)   
+            vkFlags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if ((flags & rhi::ImageUsageFlags::TransferDst) != rhi::ImageUsageFlags::None)   
+            vkFlags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if ((flags & rhi::ImageUsageFlags::Sampled) != rhi::ImageUsageFlags::None)       
+            vkFlags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        if ((flags & rhi::ImageUsageFlags::Storage) != rhi::ImageUsageFlags::None)       
+            vkFlags |= VK_IMAGE_USAGE_STORAGE_BIT;
+        if ((flags & rhi::ImageUsageFlags::ColorAttachment) != rhi::ImageUsageFlags::None) 
+            vkFlags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if ((flags & rhi::ImageUsageFlags::DepthStencilAttachment) != rhi::ImageUsageFlags::None) 
+            vkFlags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            
         return vkFlags;
     }
     

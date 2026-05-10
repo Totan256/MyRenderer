@@ -8,7 +8,7 @@
 namespace rhi::vk{
     class VulkanImage : public rhi::Image {
     public:
-        VulkanImage(VulkanDevice& device, uint32_t width, uint32_t height);
+        VulkanImage(VulkanDevice& device, const ImageDesc& desc, VkImageUsageFlags usage);
         ~VulkanImage() override;
         // コピー禁止
         VulkanImage(const VulkanImage&) = delete;

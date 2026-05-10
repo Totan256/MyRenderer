@@ -39,7 +39,8 @@ namespace rhi::vk{
     }
 
     std::unique_ptr<rhi::Image> VulkanDevice::createImage(const rhi::ImageDesc& desc) {
-        return std::make_unique<VulkanImage>(*this, desc.width, desc.height);
+        VkImageUsageFlags vkUsage = mapImageUsage(desc.usageFlags);
+        return std::make_unique<VulkanImage>(*this, desc, vkUsage);
     }
 
     std::unique_ptr<RenderGraph> VulkanDevice::createRenderGraph(){
