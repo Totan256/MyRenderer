@@ -36,8 +36,8 @@ void Renderer::render(float time) {
     auto hOutput = graph->importResource(outputBuffer.get());
 
     auto& bindGroup = graph->createBindGroup({
-        {offsetof(ScanPushConstants, inputIndex), rhi::ResourceUsage::StorageRead},
-        {offsetof(ScanPushConstants, outputIndex), rhi::ResourceUsage::StorageWrite}
+        {offsetof(ScanPushConstants, inputIndex), rhi::ResourceState::StorageRead},
+        {offsetof(ScanPushConstants, outputIndex), rhi::ResourceState::StorageWrite}
     });
 
     auto& scanPass = graph->addPass("PrefixSum", "shaders/scan.comp")

@@ -48,7 +48,7 @@ namespace rhi {
     public:
         virtual ~PassBuilder() = default;
         virtual PassBuilder& bind(const BindGroup& desc) = 0;
-        virtual PassBuilder& bind(uint32_t offset, ResourceUsage usage) = 0;
+        virtual PassBuilder& bind(uint32_t offset, ResourceState state) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
 
@@ -82,7 +82,7 @@ namespace rhi {
         std::string name;
         std::string shaderPath;
         // パスのシグネチャ (オフセット -> Usage)
-        std::map<uint32_t, ResourceUsage> signature;
+        std::map<uint32_t, ResourceState> signature;
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
         
@@ -125,7 +125,7 @@ namespace rhi {
     private:
     protected:
         std::vector<std::unique_ptr<BindGroup>> m_bindGroups;
-        bool isWriteUsage(rhi::ResourceUsage usage);
+        bool isWriteUsage(rhi::ResourceState state);
         std::vector<uint32_t> getSortPasses(std::vector<uint32_t> passIndices);
         void calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices);
         

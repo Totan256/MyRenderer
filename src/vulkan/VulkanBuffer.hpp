@@ -30,11 +30,11 @@ namespace rhi::vk{
 
         uint32_t getBindlessIndex() const { return m_bindlessIndex; }
 
-        rhi::ResourceUsage getCurrentUsage() const override { return m_usage; }
+        rhi::ResourceState getCurrentState() const override { return m_state; }
         rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
         
-        void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) override {
-            m_usage = usage;
+        void setState(rhi::ResourceState state, rhi::ShaderStage stage) override {
+            m_state = state;
             m_stage = stage;
         }
         bool isImage() const override { return false; }
@@ -46,7 +46,7 @@ namespace rhi::vk{
         VmaAllocation m_allocation = VK_NULL_HANDLE; // メモリの実体
         BufferDesc m_desc;
 
-        rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
+        rhi::ResourceState m_state = rhi::ResourceState::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
         void* m_mappedPtr;
         bool m_isPersistentlyMapped = false;

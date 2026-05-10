@@ -57,12 +57,12 @@ namespace rhi::vk {
 
         PassBuilder& bind(const BindGroup& desc) override {
             for(const auto& entry : desc.requirements) {
-                m_node.signature[entry.offset] = entry.usage;
+                m_node.signature[entry.offset] = entry.state;
             }
             return *this;
         }
-        PassBuilder& bind(uint32_t offset, ResourceUsage usage) override {
-            m_node.signature[offset] = usage;
+        PassBuilder& bind(uint32_t offset, ResourceState state) override {
+            m_node.signature[offset] = state;
             return *this;
         }
         DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
@@ -177,7 +177,7 @@ namespace rhi::vk {
             for (size_t i = 0; i < logicalNode.resourceHandles.size(); ++i) {
                 rhi::ResourceHandle h = logicalNode.resourceHandles[i];
                 const auto& req = logicalNode.requirements[i];
-                VulkanResourceState next = MapResourceState(req.usage, req.stage);
+                VulkanResourceState next = MapResourceState(req.state, req.stage);
                 VulkanResourceState prev = currentStates.count(h) ? currentStates[h] : 
                     VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
                 

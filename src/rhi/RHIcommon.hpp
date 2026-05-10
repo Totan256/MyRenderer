@@ -72,7 +72,7 @@ namespace rhi {
     };
 
     // リソースが「何として」使われるか（AccessとLayoutに対応）
-    enum class ResourceUsage : uint32_t {
+    enum class ResourceState : uint32_t {
         Undefined,
         // Read系
         ConstantBuffer,   // UBO
@@ -96,7 +96,7 @@ namespace rhi {
     
     struct ResourceRequirement {
         uint32_t      offset;
-        ResourceUsage usage;
+        ResourceState state;
         ShaderStage   stage;
     };
 }

@@ -18,11 +18,11 @@ namespace rhi::vk{
         VkImageView getView() const {return m_view;}
         uint32_t getBindlessIndex() const override { return m_bindlessIndex; }
 
-        rhi::ResourceUsage getCurrentUsage() const override { return m_usage; }
+        rhi::ResourceState getCurrentState() const override { return m_state; }
         rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
         
-        void setState(rhi::ResourceUsage usage, rhi::ShaderStage stage) override {
-            m_usage = usage;
+        void setState(rhi::ResourceState state, rhi::ShaderStage stage) override {
+            m_state = state;
             m_stage = stage;
         }
         bool isImage() const override { return true; }
@@ -36,7 +36,7 @@ namespace rhi::vk{
 
         ImageDesc m_desc;
         
-        rhi::ResourceUsage m_usage = rhi::ResourceUsage::Undefined;
+        rhi::ResourceState m_state = rhi::ResourceState::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
 
         uint32_t m_bindlessIndex = 0;

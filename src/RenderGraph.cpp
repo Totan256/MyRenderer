@@ -10,12 +10,12 @@
 
 namespace rhi{
     
-    bool RenderGraph::isWriteUsage(rhi::ResourceUsage usage) {
+    bool RenderGraph::isWriteUsage(rhi::ResourceState state) {
         using namespace rhi;
-        return usage == ResourceUsage::StorageWrite || 
-            usage == ResourceUsage::ColorAttachment || 
-            usage == ResourceUsage::DepthStencilWrite || 
-            usage == ResourceUsage::TransferDst;
+        return state == ResourceState::StorageWrite || 
+            state == ResourceState::ColorAttachment || 
+            state == ResourceState::DepthStencilWrite || 
+            state == ResourceState::TransferDst;
     }
 
     std::vector<uint32_t> RenderGraph::getSortPasses(std::vector<uint32_t> passIndices){
@@ -24,9 +24,9 @@ namespace rhi{
         std::vector<uint32_t> inDegree(numPasses, 0);
         for (size_t resIdx = 0; resIdx < m_resourceRegistry.size(); ++resIdx){
             const auto& reg = m_resourceRegistry[resIdx];
-            struct Access { uint32_t passIdx; rhi::ResourceUsage usage; };
+            struct Access { uint32_t passIdx; rhi::ResourceState state; };
             std::vector<Access> accesses;
-            for (uint32_t p : reg.producers) accesses.push_back({p, rhi::ResourceUsage::StorageWrite}); // 代表として
+            for (uint32_t p : reg.producers) accesses.push_back({p, rhi::ResourceState::StorageWrite}); // 代表として
             
             std::sort(accesses.begin(), accesses.end(), [](const Access& a, const Access& b) {
                 return a.passIdx < b.passIdx;
@@ -36,7 +36,7 @@ namespace rhi{
             std::vector<uint32_t> readsSinceLastWrite;
 
             for (const auto& access : accesses) {
-                if (isWriteUsage(access.usage)) {
+                if (isWriteUsage(access.state)) {
                     // WAW (Write-After-Write): 前の書き込みが終わってから書く
                     if (lastWritePass != 0xFFFFFFFF) {
                         if (adj[lastWritePass].insert(access.passIdx).second) {

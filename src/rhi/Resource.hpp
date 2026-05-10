@@ -8,9 +8,9 @@ namespace rhi {
     public:
         virtual ~Resource() = default;
         virtual bool isImage() const = 0;
-        virtual ResourceUsage getCurrentUsage() const = 0;
+        virtual ResourceState getCurrentState() const = 0;
         virtual ShaderStage getCurrentStage() const = 0;
-        virtual void setState(ResourceUsage usage, ShaderStage stage) = 0;
+        virtual void setState(ResourceState state, ShaderStage stage) = 0;
     };
 
     class Buffer : public Resource {
