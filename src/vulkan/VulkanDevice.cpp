@@ -18,6 +18,9 @@ namespace rhi::vk{
             m_deletionQueue.front().func();
             m_deletionQueue.pop_front();
         }
+        if (m_constantBufferManager) {
+            m_constantBufferManager->nextFrame();
+        }
     }
 
     VulkanDevice::VulkanDevice() = default;

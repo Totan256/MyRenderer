@@ -1,0 +1,73 @@
+#version 450
+#extension GL_EXT_nonuniform_qualifier : enable
+
+layout (local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// C++側の TestPushConstants と一致させる
+layout(push_constant) uniform PushConstants {
+    uint outputBufferIndex; // 出力先(SSBO)
+    uint paletteIndex;      // カラーパレット(SSBO)
+    uint staticUboIndex;    // 静的Uniform(UBO)
+    uint dynamicUboIndex;   // 動的Uniform(RingBuffer UBO)
+    uint dynamicUboOffset;  // 動的Uniformのバイトオフセット
+} pc;
+
+struct Pixel {
+    float r, g, b, a;
+};
+
+// Binding 0: Storage Buffer の配列 (SSBO)
+// 出力用のピクセルバッファや、読み込み用のカラーパレットとして使用
+layout(set = 0, binding = 0) buffer StorageBuffers {
+    Pixel pixels[];
+} buffers[];
+
+// Binding 2: Uniform Buffer の配列 (UBO)
+// GLSLのUBO仕様とバインドレス配列の兼ね合いで、16バイト(vec4)の配列として生データを読み取る
+layout(set = 0, binding = 2) uniform UniformBuffers {
+    vec4 data[4096];
+} ubos[];
+
+void main() {
+    // 1. 静的Uniform の読み取り (先頭の vec4 を取得)
+    vec4 staticData = ubos[pc.staticUboIndex].data[0];
+    uint resX = floatBitsToUint(staticData.x); // C++側で uint32_t として書き込んだものを復元
+    uint resY = floatBitsToUint(staticData.y);
+    float time = staticData.z;
+
+    // ローカルの座標
+    uint localX = gl_GlobalInvocationID.x;
+    uint localY = gl_GlobalInvocationID.y;
+
+    // 2. 動的Uniform の読み取り (バイトオフセットを vec4 単位のインデックスに変換)
+    uint dynIndex = pc.dynamicUboOffset / 16;
+    vec4 dynamicData = ubos[pc.dynamicUboIndex].data[dynIndex];
+    uint offsetX = floatBitsToUint(dynamicData.x);
+    uint offsetY = floatBitsToUint(dynamicData.y);
+    float multiplier = dynamicData.z;
+    uint paletteId = floatBitsToUint(dynamicData.w);
+
+    // 描画位置にオフセットを加算
+    uint x = localX + offsetX;
+    uint y = localY + offsetY;
+
+    if (x >= resX || y >= resY) return;
+
+    // 3. SSBO からパレット色の取得
+    Pixel baseColor = buffers[pc.paletteIndex].pixels[paletteId];
+
+    // UV座標の計算
+    vec2 uv = vec2(x, y) / vec2(resX, resY);
+
+    // 時間とUVを使ったアニメーション
+    float r = baseColor.r * 0.5 + 0.5 * sin(time + uv.x * 6.28) * multiplier;
+    float g = baseColor.g * 0.5 + 0.5 * uv.y * multiplier;
+    float b = baseColor.b * 0.5 + 0.5 * cos(time + uv.y * 6.28) * multiplier;
+
+    // ピクセルインデックスを計算して書き込み
+    uint pixelIndex = y * resX + x;
+    buffers[pc.outputBufferIndex].pixels[pixelIndex].r = r;
+    buffers[pc.outputBufferIndex].pixels[pixelIndex].g = g;
+    buffers[pc.outputBufferIndex].pixels[pixelIndex].b = b;
+    buffers[pc.outputBufferIndex].pixels[pixelIndex].a = 1.0;
+}

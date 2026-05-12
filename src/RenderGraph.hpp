@@ -27,8 +27,12 @@ namespace rhi {
         virtual ~DispatchObject() = default;
         virtual DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
         virtual DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) = 0;
-        // virtual DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) = 0; todo実装
+
+        virtual DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) = 0;
+        virtual DispatchObject& setUniformRaw(uint32_t offset, const void* data, size_t size) = 0;
+
         virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
+
         // テンプレートでのヘルパー
         template<typename T>
         DispatchObject& updateConstant(uint32_t offset, const T& value) {
@@ -91,8 +95,11 @@ namespace rhi {
             std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> pushData{};
             uint32_t pushDataSize = 0;
             std::map<uint32_t, ResourceHandle> resourceOffsets;
-            struct UBOBinding { uint32_t index; uint32_t offset; };
-            std::map<uint32_t, UBOBinding> uboBindings;
+            // 動的Uniformデータを一時保存するマップ
+            std::map<uint32_t, std::vector<uint8_t>> dynamicUniforms;
+
+            // struct UBOBinding { uint32_t index; uint32_t offset; };
+            // std::map<uint32_t, UBOBinding> uboBindings;
             uint32_t x, y, z;
         };
         std::vector<DispatchState> dispatchStates;

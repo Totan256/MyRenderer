@@ -38,6 +38,17 @@ namespace rhi::vk {
             m_ds.resourceOffsets[offset] = handle;
             return *this;
         }
+        DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) override {
+            // 静的Uniformはバッファ自体がリソースとして存在するため、通常のupdateResourceと同じ扱いでバインドレスインデックスを渡す。
+            m_ds.resourceOffsets[offset] = handle;
+            return *this;
+        }
+        DispatchObject& setUniformRaw(uint32_t offset, const void* data, size_t size) override {
+            auto& vec = m_ds.dynamicUniforms[offset];
+            vec.resize(size);
+            std::memcpy(vec.data(), data, size);
+            return *this;
+        }
         DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) override {
             m_ds.x = x;
             m_ds.y = y;
@@ -238,6 +249,7 @@ namespace rhi::vk {
                 std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> finalPushData = state.pushData;
                 uint32_t finalPushSize = state.pushDataSize;
 
+                // 静的リソース(Image/Buffer/静的UBO)のインデックス解決
                 for (auto const& [offset, handle] : state.resourceOffsets) {
                     uint32_t bindlessIndex = getPhysicalIndex(handle);
                     if (offset + 4 <= MAX_PUSH_CONSTANT_SIZE) {
@@ -245,11 +257,14 @@ namespace rhi::vk {
                         finalPushSize = std::max(finalPushSize, offset + 4);
                     }
                 }
-                
-                for (auto const& [offset, binding] : state.uboBindings) {
+                // 動的リソース(動的UBO)のリングバッファ書き込みとPushContents反映
+                for (auto const& [offset, dataVec] : state.dynamicUniforms) {
+                    // ConstantBufferManagerを利用してメモリを割り当て、データを書き込む
+                    auto allocation = m_device.getConstantBufferManager().allocateAndWrite(dataVec.data(), dataVec.size());
+                    // UBOはインデックス(4byte)とオフセット(4byte)の合計8byteが必要
                     if (offset + 8 <= MAX_PUSH_CONSTANT_SIZE) {
-                        std::memcpy(finalPushData.data() + offset, &binding.index, 4);
-                        std::memcpy(finalPushData.data() + offset + 4, &binding.offset, 4);
+                        std::memcpy(finalPushData.data() + offset, &allocation.index, 4);
+                        std::memcpy(finalPushData.data() + offset + 4, &allocation.offset, 4);
                         finalPushSize = std::max(finalPushSize, offset + 8);
                     }
                 }
@@ -261,6 +276,4 @@ namespace rhi::vk {
             }
         }
     }
-
-
 }
