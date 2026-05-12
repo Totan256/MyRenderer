@@ -9,8 +9,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Vulkan REQUIRED)
 
-# 【修正点】名前を "vulkan-memory-allocator" (ハイフン区切り) に変更
-# vcpkgの仕様ではここがケバブケース(kebab-case)になります
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 
 find_package(glm CONFIG REQUIRED)
@@ -51,8 +49,6 @@ target_include_directories(RendererApp PRIVATE
 target_link_libraries(RendererApp PRIVATE
     Vulkan::Vulkan
     
-    # 【重要】ターゲット名(リンク時の名前)は "GPUOpen::VulkanMemoryAllocator" で正解です
-    # find_packageの名前とは異なるので注意が必要です
     GPUOpen::VulkanMemoryAllocator
 
     glm::glm

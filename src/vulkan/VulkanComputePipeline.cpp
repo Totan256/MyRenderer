@@ -7,7 +7,6 @@ namespace rhi::vk{
         : m_device(device), m_pushContentsSize(pushContentsSize){
         
         // 1. ディスクリプタセットレイアウトの作成（Binding=0にStorageBufferがあることを定義）
-        createDescriptorSetLayout();
 
         // 2. パイプラインの作成（シェーダー読み込み -> パイプラインレイアウト -> パイプライン）
         createPipeline(shaderPath);
@@ -25,31 +24,6 @@ namespace rhi::vk{
         if (m_shaderModule != VK_NULL_HANDLE) {
             vkDestroyShaderModule(device, m_shaderModule, nullptr);
         }
-    }
-
-    void VulkanComputePipeline::createDescriptorSetLayout() {
-        std::vector<VkDescriptorSetLayoutBinding> bindings;
-
-        // Binding 0: Storage Image (画像出力)
-        VkDescriptorSetLayoutBinding outputBinding{};
-        outputBinding.binding = 0;
-        outputBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        outputBinding.descriptorCount = 1;
-        outputBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        bindings.push_back(outputBinding);
-
-        // Binding 1: Uniform Buffer (シーンデータ)
-        VkDescriptorSetLayoutBinding sceneBinding{};
-        sceneBinding.binding = 1;
-        sceneBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        sceneBinding.descriptorCount = 1;
-        sceneBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        bindings.push_back(sceneBinding);
-
-        VkDescriptorSetLayoutCreateInfo layoutInfo{};
-        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-        layoutInfo.pBindings = bindings.data();
     }
 
     void VulkanComputePipeline::createPipeline(const std::string& shaderPath) {

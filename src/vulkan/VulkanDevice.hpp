@@ -79,7 +79,7 @@ namespace rhi::vk{
         };
 
         VkInstance m_instance = VK_NULL_HANDLE;
-        VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE; // デバッグ用
+        // VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE; // デバッグ用
         VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;

@@ -31,7 +31,6 @@ namespace rhi::vk{
         static std::vector<uint32_t> readFile(const std::string& filename);
         static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath);
 
-        void createDescriptorSetLayout();
         void createPipeline(const std::string& shaderPath);
     };
 }
