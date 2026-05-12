@@ -8,7 +8,6 @@
     "lodepng",
     "stb",
     "spirv-cross",
-    "vulkan-memory-allocator",
-    "shaderc"
+    "vulkan-memory-allocator"
   ]
 }

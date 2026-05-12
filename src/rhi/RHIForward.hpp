@@ -19,12 +19,7 @@ namespace rhi {
         class VulkanRenderGraph;
     }
 
-    // using Device = vk::VulkanDevice;
-    // using Buffer = vk::VulkanBuffer;
-    // using Image = vk::VulkanImage;
-    // using CommandList = vk::VulkanCommandList;
     using ComputePipeline = vk::VulkanComputePipeline;
-    // using RenderGraph = vk::VulkanRenderGraph;
 #elif defined(RHI_USE_DX12)
     // DX12用の前方宣言とalias
 #endif

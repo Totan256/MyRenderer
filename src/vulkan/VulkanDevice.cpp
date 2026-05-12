@@ -190,7 +190,6 @@ namespace rhi::vk{
         indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
         indexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
         indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
-        indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
         indexingFeatures.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
         indexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
         indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;

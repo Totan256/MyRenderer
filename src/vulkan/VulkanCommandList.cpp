@@ -94,15 +94,6 @@ namespace rhi::vk {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.getPipeline());
     }
 
-    void VulkanCommandList::bindDescriptorSet(VkDescriptorSet descriptorSet) {
-        vkCmdBindDescriptorSets(
-            m_commandBuffer, 
-            VK_PIPELINE_BIND_POINT_COMPUTE, 
-            m_pipeline->getPipelineLayout(), 
-            0, 1, &descriptorSet, 0, nullptr
-        );
-    }
-
     void VulkanCommandList::bindGlobalDescriptorSet() {
         VkDescriptorSet globalSet = m_device.getBindlessDescriptorSet();
         vkCmdBindDescriptorSets(

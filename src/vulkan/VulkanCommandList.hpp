@@ -28,7 +28,6 @@ namespace rhi::vk{
         void bindPipeline(VulkanComputePipeline& pipeline);
 
         // ディスクリプタセット（リソース）をセットする
-        void bindDescriptorSet(VkDescriptorSet descriptorSet);
         void bindGlobalDescriptorSet();
 
         // 計算を実行する (Dispatch)
