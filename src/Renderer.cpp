@@ -44,7 +44,7 @@ void Renderer::render(float time) {
         .bind(bindGroup);
 
     // 1024要素なので、ディスパッチは x=1 (1ワークグループのみ)
-    auto s1 =scanPass.dispatch(1, 1, 1)
+    auto& s1 =scanPass.dispatch(1, 1, 1)
         .updateResource(offsetof(ScanPushConstants, inputIndex), hInput)
         .updateResource(offsetof(ScanPushConstants, outputIndex), hOutput)
         .updateConstant(offsetof(ScanPushConstants, elementCount), ELEMENT_COUNT);
