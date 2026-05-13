@@ -38,7 +38,14 @@ namespace rhi::vk {
         }
 
         std::memcpy(frame.mappedPtr + alignedOffset, data, size);
-        vmaFlushAllocation(m_device.getAllocator(), frame.buffer->getAllocation(), alignedOffset, size);
+        
+        VkMemoryPropertyFlags memFlags;
+        vmaGetAllocationMemoryProperties(m_device.getAllocator(), frame.buffer->getAllocation(), &memFlags);
+        // HOST_COHERENT（自動反映）のフラグが「含まれていない」場合だけFlushする
+        if ((memFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+            vmaFlushAllocation(m_device.getAllocator(), frame.buffer->getAllocation(), alignedOffset, size);
+        }
+
         frame.currentOffset = alignedOffset + size;
 
         return { frame.buffer->getBindlessIndex(), alignedOffset };
