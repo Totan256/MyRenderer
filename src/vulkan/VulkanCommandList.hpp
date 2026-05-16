@@ -21,6 +21,7 @@ namespace rhi::vk{
 
         void submit(SemaphoreHandle waitSemaphore = nullptr, SemaphoreHandle signalSemaphore = nullptr) override;
         void wait() override;
+        void reset() override;
 
         // コマンドの送信と完了待機（オフラインレンダリング用）
         void submitAndWait() override;

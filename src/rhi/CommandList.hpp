@@ -12,6 +12,7 @@ namespace rhi {
         
         virtual void submit(SemaphoreHandle waitSemaphore = nullptr, SemaphoreHandle signalSemaphore = nullptr) = 0;
         virtual void wait() = 0;
+        virtual void reset() = 0;
 
         // オフラインレンダリング用の簡易同期メソッド
         virtual void submitAndWait() = 0; 

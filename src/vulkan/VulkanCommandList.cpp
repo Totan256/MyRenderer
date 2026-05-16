@@ -52,14 +52,8 @@ namespace rhi::vk {
     }
 
     void VulkanCommandList::begin() {
-        // フェンスがシグナル状態（前回の実行完了）になるまで待つ
-        // タイムアウトは最大値
-        vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
-        vkResetFences(m_device.getDevice(), 1, &m_fence); // 非シグナル状態に戻す
-
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        // ワンタイムサブミット（1回記録して1回実行して捨てる使い方）のヒント
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         if (vkBeginCommandBuffer(m_commandBuffer, &beginInfo) != VK_SUCCESS) {
@@ -102,6 +96,9 @@ namespace rhi::vk {
 
     void VulkanCommandList::wait() {
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
+    }
+    void VulkanCommandList::reset() {
+        vkResetFences(m_device.getDevice(), 1, &m_fence); 
     }
 
     void VulkanCommandList::submitAndWait() {
