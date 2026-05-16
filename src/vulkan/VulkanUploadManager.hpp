@@ -7,12 +7,11 @@
 #include <vector>
 
 namespace rhi::vk {
-    // ステージングメモリの割り当て結果
     struct StagingAllocation {
         VulkanBuffer* buffer;
         size_t offset;
         void* mappedPtr;
-        bool isTemporary; // trueならリングバッファ外の専用バッファ
+        bool isTemporary; 
     };
 
     class VulkanUploadManager : public UploadManager {
@@ -20,34 +19,33 @@ namespace rhi::vk {
         VulkanUploadManager(VulkanDevice& device, size_t ringBufferSize);
         ~VulkanUploadManager() override;
 
+        void* mapForUploadImmediate(Buffer* dstBuffer, size_t size) override;
         void uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) override;
         void waitForImmediateUploads() override;
 
-        void requestUploadDeferred(Buffer* dstBuffer, std::vector<uint8_t>&& data) override;
+        void* mapForUploadDeferred(Buffer* dstBuffer, size_t size) override;
         void requestUploadDeferred(Buffer* dstBuffer, const void* data, size_t size) override;
 
-        void flushDeferredUploads() override;
+        SemaphoreHandle flushDeferredUploads() override;
         void garbageCollect(uint64_t completedFrameId) override;
 
     private:
         VulkanDevice& m_device;
         
-        // リングバッファ関連
         std::unique_ptr<VulkanBuffer> m_ringBuffer;
         size_t m_ringBufferSize;
         size_t m_ringBufferOffset = 0;
         uint8_t* m_ringMappedPtr = nullptr;
 
-        // コマンドリスト
         std::unique_ptr<VulkanCommandList> m_immediateCmd;
         std::unique_ptr<VulkanCommandList> m_deferredCmd;
         bool m_hasDeferredCommands = false;
 
-        // 破棄待ちリソース
-        std::vector<std::unique_ptr<VulkanBuffer>> m_pendingTemporaryBuffers;
-        std::vector<std::vector<uint8_t>> m_pendingDataKeepAlive;
+        // 同期用のVulkan Semaphore
+        VkSemaphore m_transferSemaphore = VK_NULL_HANDLE;
 
-        // メモリ割り当ての分岐ロジック
+        std::vector<std::unique_ptr<VulkanBuffer>> m_pendingTemporaryBuffers;
+
         StagingAllocation allocateStagingSpace(size_t size);
     };
 }

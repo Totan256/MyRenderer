@@ -55,6 +55,12 @@ namespace rhi::vk {
         return { m_ringBuffer.get(), allocOffset, ptr, false };
     }
 
+    void* VulkanUploadManager::mapForUploadImmediate(Buffer* dstBuffer, size_t size) {
+        StagingAllocation alloc = allocateStagingSpace(size);
+        m_immediateCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
+        return alloc.mappedPtr;
+    }
+
     void VulkanUploadManager::uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) {
         StagingAllocation alloc = allocateStagingSpace(size);
         std::memcpy(alloc.mappedPtr, data, size);
@@ -63,6 +69,7 @@ namespace rhi::vk {
     }
 
     void VulkanUploadManager::waitForImmediateUploads() {
+        // Todo こっちもセマフォのほうがいいかも
         m_immediateCmd->end();
         m_immediateCmd->submitAndWait(); // 同期待機
 
@@ -79,30 +86,27 @@ namespace rhi::vk {
         m_hasDeferredCommands = true;
     }
 
-    void VulkanUploadManager::requestUploadDeferred(Buffer* dstBuffer, std::vector<uint8_t>&& data) {
-        // Zero-Copyアプローチ（ただしGPUからは読めないので、今回は単純化のためにコピーにフォールバックします）
-        // ※厳密なZero-Copyを行うには、アロケータをバイパスして直接Vulkanバッファ化する必要があります
-        requestUploadDeferred(dstBuffer, data.data(), data.size());
-        m_pendingDataKeepAlive.push_back(std::move(data)); // 寿命だけ保持
+    void* VulkanUploadManager::mapForUploadDeferred(Buffer* dstBuffer, size_t size) {
+        StagingAllocation alloc = allocateStagingSpace(size);
+        m_deferredCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
+        m_hasDeferredCommands = true;
+        return alloc.mappedPtr;
     }
 
-    void VulkanUploadManager::flushDeferredUploads() {
-        if (!m_hasDeferredCommands) return;
-
+    SemaphoreHandle VulkanUploadManager::flushDeferredUploads() {
+        if (!m_hasDeferredCommands) return nullptr;
         m_deferredCmd->end();
-        
-        // ToDo: 本格的な非同期化時は、ここで Semaphore を Signal し、RenderGraph で Wait する。
-        // 現状はシンプルに SubmitAndWait で動作確認できるようにします。
-        m_deferredCmd->submitAndWait();
+        m_deferredCmd->submit(nullptr, m_transferSemaphore);
 
         m_hasDeferredCommands = false;
         m_deferredCmd->begin();
-    }
 
+        // 抽象ハンドルとしてセマフォを返す
+        return static_cast<SemaphoreHandle>(m_transferSemaphore);
+    }
     void VulkanUploadManager::garbageCollect(uint64_t completedFrameId) {
         // RenderGraphの実行完了後に呼ばれる
         m_pendingTemporaryBuffers.clear();
-        m_pendingDataKeepAlive.clear();
         m_ringBufferOffset = 0; // リングバッファリセット
     }
 }

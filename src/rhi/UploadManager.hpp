@@ -8,24 +8,34 @@ namespace rhi {
     public:
         virtual ~UploadManager() = default;
 
-        // 1. 即時インポート（ロード画面等で使用。完了するまでCPUが待機する）
+        // ---------------------------------------------------------
+        // 1. 即時インポート (ロード画面・初期化用)
+        // ---------------------------------------------------------
+        // ステージングメモリを確保し、CPUから直接書き込めるポインタを返す
+        virtual void* mapForUploadImmediate(Buffer* dstBuffer, size_t size) = 0;
+        
+        // データを渡してコピーする便利関数
         virtual void uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) = 0;
         
-        // 連続した即時インポートの後に、一括で完了を待機して一時リソースを破棄する
+        // これまでに積んだ即時インポートコマンドを送信し、CPUで完了を待機する
         virtual void waitForImmediateUploads() = 0;
 
-        // 2. 遅延インポート（ゲームループで使用。CPUは待機せず、GPUタイムラインで同期）
-        // パターンA: 所有権の移動（大容量データ向け、Zero-Copy）
-        virtual void requestUploadDeferred(Buffer* dstBuffer, std::vector<uint8_t>&& data) = 0;
+        // ---------------------------------------------------------
+        // 2. 遅延インポート (ゲームループ用)
+        // ---------------------------------------------------------
+        // ステージングメモリを確保し、直接書き込めるポインタを返す
+        virtual void* mapForUploadDeferred(Buffer* dstBuffer, size_t size) = 0;
         
-        // パターンB: バッファへの直接コピー（小容量データ向け、Fire and Forget）
+        // データコピー版
         virtual void requestUploadDeferred(Buffer* dstBuffer, const void* data, size_t size) = 0;
 
-        // 3. システムからの呼び出し用
-        // 溜まった遅延タスクをTransferキューに送信（RenderGraph実行前に呼ぶ）
-        virtual void flushDeferredUploads() = 0;
+        // 遅延コマンドをGPUに送信し、完了時にシグナルされるSemaphoreを返す
+        // CPUは待機せず、後続の描画コマンドがこのSemaphoreをWaitする
+        virtual SemaphoreHandle flushDeferredUploads() = 0;
         
-        // フレーム終了時に古い一時リソースをガベージコレクトする
+        // ---------------------------------------------------------
+        // フレーム終了処理
+        // ---------------------------------------------------------
         virtual void garbageCollect(uint64_t completedFrameId) = 0;
     };
 }

@@ -73,6 +73,37 @@ namespace rhi::vk {
         }
     }
 
+    void VulkanCommandList::submit(SemaphoreHandle waitSemaphore, SemaphoreHandle signalSemaphore) {
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &m_commandBuffer;
+
+        VkSemaphore vkWaitSem = static_cast<VkSemaphore>(waitSemaphore);
+        VkSemaphore vkSignalSem = static_cast<VkSemaphore>(signalSemaphore);
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT}; 
+        
+        if (vkWaitSem != VK_NULL_HANDLE) {
+            submitInfo.waitSemaphoreCount = 1;
+            submitInfo.pWaitSemaphores = &vkWaitSem;
+            submitInfo.pWaitDstStageMask = waitStages;
+        }
+
+        if (vkSignalSem != VK_NULL_HANDLE) {
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = &vkSignalSem;
+        }
+
+        // m_fence を渡して実行。完了するとフェンスがシグナル状態になるが、CPUでは待たない
+        if (vkQueueSubmit(m_device.getComputeQueue(), 1, &submitInfo, m_fence) != VK_SUCCESS) {
+            throw std::runtime_error("failed to submit command buffer!");
+        }
+    }
+
+    void VulkanCommandList::wait() {
+        vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
+    }
+
     void VulkanCommandList::submitAndWait() {
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -85,7 +116,7 @@ namespace rhi::vk {
         }
 
         // 完了を待つ（オフラインレンダリングなので）
-        // ToDo：りあうタイムレンダリング用に書き換え
+        // ToDo：リアルタイムレンダリング用に書き換え
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
     }
 

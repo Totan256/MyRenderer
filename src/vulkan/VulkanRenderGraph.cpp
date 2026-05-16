@@ -103,7 +103,7 @@ namespace rhi::vk {
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
     }
-    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {// todo リソースをdescから作れるようにするmust
+    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
         ResourceRegistration reg{}; reg.isImported = true; reg.physicalResource = res;
         m_resourceRegistry.push_back(reg); return handle;
