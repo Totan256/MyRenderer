@@ -106,4 +106,16 @@ namespace rhi::vk {
     void VulkanCommandList::dispatch(uint32_t x, uint32_t y, uint32_t z) {
         vkCmdDispatch(m_commandBuffer, x, y, z);
     }
+
+    void VulkanCommandList::copyBuffer(rhi::Buffer* src, rhi::Buffer* dst, size_t size, size_t srcOffset, size_t dstOffset) {
+        auto& vkSrc = static_cast<VulkanBuffer&>(*src);
+        auto& vkDst = static_cast<VulkanBuffer&>(*dst);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = srcOffset;
+        copyRegion.dstOffset = dstOffset;
+        copyRegion.size = size;
+
+        vkCmdCopyBuffer(m_commandBuffer, vkSrc.getNativeBuffer(), vkDst.getNativeBuffer(), 1, &copyRegion);
+    }
 }

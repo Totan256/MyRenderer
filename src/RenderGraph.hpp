@@ -85,6 +85,7 @@ namespace rhi {
     struct LogicalPass {// Tod最適化検討
         std::string name;
         std::string shaderPath;
+        PassType type = PassType::Compute;
         // パスのシグネチャ (オフセット -> Usage)
         std::map<uint32_t, ResourceState> signature;
         std::vector<ResourceHandle> resourceHandles;
@@ -121,6 +122,7 @@ namespace rhi {
             return *m_bindGroups.back();
         }
         virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath) = 0;
+        virtual void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size) = 0;
 
         // バリアの計算
         virtual void compile() = 0;

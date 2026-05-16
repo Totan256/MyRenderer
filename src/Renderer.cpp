@@ -3,22 +3,21 @@
 #include "RenderGraph.hpp"
 #include "CommandList.hpp"
 #include "ImageExporter.hpp"
+#include "rhi/UploadManager.hpp" // 追加
 #include <iostream>
 #include <cstddef>
 #include <vector>
 
 // --- データ構造体の定義 ---
+// 省略せずにそのままです
 struct TestPushConstants {
     uint32_t outputBufferIndex;
     uint32_t paletteIndex;
     uint32_t staticUboIndex;
-    
-    // updateUniform によって書き込まれるインデックスとオフセット(合計8バイト)
     uint32_t dynamicUboIndex;
     uint32_t dynamicUboOffset;
 };
 
-// 静的 Uniform (16バイト)
 struct StaticUniformData {
     uint32_t resX;
     uint32_t resY;
@@ -26,7 +25,6 @@ struct StaticUniformData {
     float padding;
 };
 
-// 動的 Uniform (16バイト)
 struct DynamicUniformData {
     uint32_t offsetX;
     uint32_t offsetY;
@@ -34,7 +32,6 @@ struct DynamicUniformData {
     uint32_t paletteId;
 };
 
-// カラーピクセル/パレット用
 struct ColorVec4 {
     float r, g, b, a;
 };
@@ -55,20 +52,35 @@ void Renderer::render(float time) {
         {0.2f, 0.2f, 1.0f, 1.0f}, // 2: Blue
         {1.0f, 1.0f, 0.2f, 1.0f}  // 3: Yellow
     };
-    auto paletteBuffer = m_device.createBuffer({palette.size() * sizeof(ColorVec4), rhi::BufferUsageFlags::StorageBuffer, true});
-    std::memcpy(paletteBuffer->map(), palette.data(), palette.size() * sizeof(ColorVec4));
-    paletteBuffer->unmap();
+    
+    // ★ CPU不可視(false)とし、TransferDstフラグを追加してデバイスローカルに作成
+    auto paletteBuffer = m_device.createBuffer({
+        palette.size() * sizeof(ColorVec4), 
+        rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst, 
+        false
+    });
+    // ★ 即時アップロードの実行
+    m_device.getUploadManager()->uploadImmediate(paletteBuffer.get(), palette.data(), palette.size() * sizeof(ColorVec4));
 
     // 3. 静的 Uniform Buffer
     StaticUniformData staticData = { m_width, m_height, time, 0.0f };
-    auto staticUbo = m_device.createBuffer({sizeof(StaticUniformData), rhi::BufferUsageFlags::UniformBuffer, true});
-    std::memcpy(staticUbo->map(), &staticData, sizeof(StaticUniformData));
-    staticUbo->unmap();
+    // ★ CPU不可視とし、TransferDstフラグを追加
+    auto staticUbo = m_device.createBuffer({
+        sizeof(StaticUniformData), 
+        rhi::BufferUsageFlags::UniformBuffer | rhi::BufferUsageFlags::TransferDst, 
+        false
+    });
+    // ★ 即時アップロードの実行
+    m_device.getUploadManager()->uploadImmediate(staticUbo.get(), &staticData, sizeof(StaticUniformData));
+
+    // ★ ここで一括してアップロード完了を待機する
+    m_device.getUploadManager()->waitForImmediateUploads();
 
     // 4. RenderGraph の構築
     std::cout << "--- Building Render Graph ---" << std::endl;
     auto graph = m_device.createRenderGraph();
     
+    // 以下、グラフ構築と実行のコードは変更なし
     auto hOutput    = graph->importResource(outputBuffer.get());
     auto hPalette   = graph->importResource(paletteBuffer.get());
     auto hStaticUbo = graph->importResource(staticUbo.get());
@@ -82,15 +94,12 @@ void Renderer::render(float time) {
     auto& pass = graph->addPass("UniformTest", "shaders/uniform_test.comp")
                       .bind(bindGroup);
 
-    // 画面を4分割して描画するため、それぞれのサイズを計算
     uint32_t halfW = m_width / 2;
     uint32_t halfH = m_height / 2;
     uint32_t groupX = (halfW + 15) / 16;
     uint32_t groupY = (halfH + 15) / 16;
 
-    // --- マルチディスパッチの設定 (動的Uniformの適用) ---
-    
-    // Dispatch 0: 左上
+    // Dispatch 0
     DynamicUniformData dyn0 = {0, 0, 1.0f, 0};
     pass.dispatch(groupX, groupY, 1)
         .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
@@ -98,7 +107,7 @@ void Renderer::render(float time) {
         .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
         .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn0);
 
-    // Dispatch 1: 右上
+    // Dispatch 1
     DynamicUniformData dyn1 = {halfW, 0, 1.5f, 1};
     pass.dispatch(groupX, groupY, 1)
         .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
@@ -106,7 +115,7 @@ void Renderer::render(float time) {
         .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
         .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn1);
 
-    // Dispatch 2: 左下
+    // Dispatch 2
     DynamicUniformData dyn2 = {0, halfH, 0.8f, 2};
     pass.dispatch(groupX, groupY, 1)
         .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
@@ -114,7 +123,7 @@ void Renderer::render(float time) {
         .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
         .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn2);
 
-    // Dispatch 3: 右下
+    // Dispatch 3
     DynamicUniformData dyn3 = {halfW, halfH, 2.0f, 3};
     pass.dispatch(groupX, groupY, 1)
         .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)

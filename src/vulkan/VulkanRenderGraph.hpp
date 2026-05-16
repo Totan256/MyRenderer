@@ -29,6 +29,8 @@ namespace rhi::vk {
         ResourceHandle createBuffer(const BufferDesc& desc) override;
         uint32_t getPhysicalIndex(ResourceHandle handle) override;
 
+        void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size) override;
+
         // バリア決定アルゴリズム
         void compile() override;
 

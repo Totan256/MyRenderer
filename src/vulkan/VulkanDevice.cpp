@@ -6,6 +6,9 @@
 #include "RenderGraph.hpp"
 #include "VulkanRenderGraph.hpp"
 #include "VulkanConstantBufferManager.hpp"
+#include "VulkanCommandList.hpp"
+#include "VulkanResourceAllocator.hpp"
+#include "VulkanUploadManager.hpp"
 #include <iostream>
 
 
@@ -26,6 +29,10 @@ namespace rhi::vk{
     VulkanDevice::VulkanDevice() = default;
 
     void VulkanDevice::endFrame() {
+        if (m_uploadManager) {
+            // フレーム終了時に一時バッファを破棄
+            m_uploadManager->garbageCollect(m_frameCounter);
+        }
         m_frameCounter++;
     }
 
@@ -69,10 +76,14 @@ namespace rhi::vk{
         createBindlessResources();
 
         // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
-        // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意
+        // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意またはconfigで指定できるようにする
         m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 65536, 2);
+        m_uploadManager = std::make_unique<VulkanUploadManager>(*this, 16 * 1024 * 1024);
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
+    }
+    rhi::UploadManager* VulkanDevice::getUploadManager() {
+        return m_uploadManager.get();
     }
 
     void VulkanDevice::createInstance(){
@@ -244,6 +255,7 @@ namespace rhi::vk{
 
     VulkanDevice::~VulkanDevice(){
         m_constantBufferManager.reset();
+        m_uploadManager.reset();
         // すべてのリソースが解放されるのを待機
         m_frameCounter += MAX_FRAMES_IN_FLIGHT + 1;
         beginFrame();

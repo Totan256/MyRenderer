@@ -10,8 +10,10 @@
 #include "rhi/Device.hpp"
 #include "rhi/Resource.hpp"
 #include "RenderGraph.hpp"
+#include "rhi/UploadManager.hpp"
 namespace rhi::vk{
     class ConstantBufferManager; // 前方宣言
+    class VulkanUploadManager; // 前方宣言
 
     // エラーチェック用の簡易マクロ
     #define VK_CHECK(call) \
@@ -72,6 +74,8 @@ namespace rhi::vk{
         uint32_t registerUniformBuffer(VkBuffer buffer, VkDeviceSize size);
         void unregisterIndex(uint32_t index);
 
+        rhi::UploadManager* getUploadManager() override;
+
     private:
         struct DeletionEntry {
             uint64_t targetFrame;
@@ -101,6 +105,7 @@ namespace rhi::vk{
         uint64_t m_frameCounter = 0;
         std::deque<DeletionEntry> m_deletionQueue;
         std::mutex m_deletionMutex;
+        std::unique_ptr<VulkanUploadManager> m_uploadManager;
         
         void createBindlessResources(); // 初期化時に呼ぶ
 

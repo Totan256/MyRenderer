@@ -72,6 +72,12 @@ namespace rhi {
                 (usageFlags&other.usageFlags) == other.usageFlags;
         }
     };
+
+    enum class PassType {
+        Compute,
+        Graphics,
+        Copy
+    };
     
     enum class ShaderStage : uint64_t {
         None          = 0,

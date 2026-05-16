@@ -217,6 +217,27 @@ namespace rhi::vk {
         m_sortedIndices = sortedIndices;
     }
 
+    void VulkanRenderGraph::addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size) {
+        m_logicalNodes.emplace_back();
+        auto& node = m_logicalNodes.back();
+        node.name = name;
+        node.type = PassType::Copy; // パスタイプをコピーに設定
+        
+        // 依存関係（バリア）を解決するために、入出力として登録する
+        node.resourceHandles.push_back(srcBuffer);
+        node.requirements.push_back({0, rhi::ResourceState::TransferSrc, rhi::ShaderStage::Transfer});
+        
+        node.resourceHandles.push_back(dstBuffer);
+        node.requirements.push_back({1, rhi::ResourceState::TransferDst, rhi::ShaderStage::Transfer});
+        
+        // DispatchStateを悪用（借用）してコピー情報を保存しておく（オフセットとサイズ）
+        node.dispatchStates.push_back({});
+        auto& ds = node.dispatchStates.back();
+        ds.resourceOffsets[0] = srcBuffer;
+        ds.resourceOffsets[1] = dstBuffer;
+        ds.x = size; // サイズ情報を一時的に保存
+    }
+
     void VulkanRenderGraph::execute(CommandList& cmd) {
         auto& vkCmd = static_cast<VulkanCommandList&>(cmd);
 
@@ -234,45 +255,55 @@ namespace rhi::vk {
                 depInfo.pBufferMemoryBarriers    = physiaclNode.bufferBarriers.data();
                 vkCmdPipelineBarrier2(vkCmd.getCommandBuffer(), &depInfo);
             }
-
-            // 2. パイプラインのバインド
-            if (!logicalNode.shaderPath.empty()) {
-                auto* pipeline = m_pipelines[logicalNode.shaderPath].get();
-                if (pipeline) {
-                    vkCmd.bindPipeline(*pipeline);
-                    vkCmd.bindGlobalDescriptorSet();
-                }
-            }
-
-            // 3. ループでマルチディスパッチを処理
-            for (auto& state : logicalNode.dispatchStates) {
-                std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> finalPushData = state.pushData;
-                uint32_t finalPushSize = state.pushDataSize;
-
-                // 静的リソース(Image/Buffer/静的UBO)のインデックス解決
-                for (auto const& [offset, handle] : state.resourceOffsets) {
-                    uint32_t bindlessIndex = getPhysicalIndex(handle);
-                    if (offset + 4 <= MAX_PUSH_CONSTANT_SIZE) {
-                        std::memcpy(finalPushData.data() + offset, &bindlessIndex, 4);
-                        finalPushSize = std::max(finalPushSize, offset + 4);
+            if (logicalNode.type == PassType::Copy) {
+                // コピーパスの場合
+                auto& ds = logicalNode.dispatchStates[0];
+                rhi::Buffer* physSrc = m_resourceAllocator.getPhysicalBuffer(ds.resourceOffsets[0]);
+                rhi::Buffer* physDst = m_resourceAllocator.getPhysicalBuffer(ds.resourceOffsets[1]);
+                size_t copySize = ds.x;
+                
+                vkCmd.copyBuffer(physSrc, physDst, copySize);
+            } 
+            else if (logicalNode.type == PassType::Compute) {
+                // コンピュートパスの場合
+                // 2. パイプラインのバインド
+                if (!logicalNode.shaderPath.empty()) {
+                    auto* pipeline = m_pipelines[logicalNode.shaderPath].get();
+                    if (pipeline) {
+                        vkCmd.bindPipeline(*pipeline);
+                        vkCmd.bindGlobalDescriptorSet();
                     }
                 }
-                // 動的リソース(動的UBO)のリングバッファ書き込みとPushContents反映
-                for (auto const& [offset, dataVec] : state.dynamicUniforms) {
-                    // ConstantBufferManagerを利用してメモリを割り当て、データを書き込む
-                    auto allocation = m_device.getConstantBufferManager().allocateAndWrite(dataVec.data(), dataVec.size());
-                    // UBOはインデックス(4byte)とオフセット(4byte)の合計8byteが必要
-                    if (offset + 8 <= MAX_PUSH_CONSTANT_SIZE) {
-                        std::memcpy(finalPushData.data() + offset, &allocation.index, 4);
-                        std::memcpy(finalPushData.data() + offset + 4, &allocation.offset, 4);
-                        finalPushSize = std::max(finalPushSize, offset + 8);
-                    }
-                }
+                // 3. ループでマルチディスパッチを処理
+                for (auto& state : logicalNode.dispatchStates) {
+                    std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> finalPushData = state.pushData;
+                    uint32_t finalPushSize = state.pushDataSize;
 
-                if (finalPushSize > 0) {
-                    vkCmd.setPushData(0, finalPushSize, finalPushData.data());
+                    // 静的リソース(Image/Buffer/静的UBO)のインデックス解決
+                    for (auto const& [offset, handle] : state.resourceOffsets) {
+                        uint32_t bindlessIndex = getPhysicalIndex(handle);
+                        if (offset + 4 <= MAX_PUSH_CONSTANT_SIZE) {
+                            std::memcpy(finalPushData.data() + offset, &bindlessIndex, 4);
+                            finalPushSize = std::max(finalPushSize, offset + 4);
+                        }
+                    }
+                    // 動的リソース(動的UBO)のリングバッファ書き込みとPushContents反映
+                    for (auto const& [offset, dataVec] : state.dynamicUniforms) {
+                        // ConstantBufferManagerを利用してメモリを割り当て、データを書き込む
+                        auto allocation = m_device.getConstantBufferManager().allocateAndWrite(dataVec.data(), dataVec.size());
+                        // UBOはインデックス(4byte)とオフセット(4byte)の合計8byteが必要
+                        if (offset + 8 <= MAX_PUSH_CONSTANT_SIZE) {
+                            std::memcpy(finalPushData.data() + offset, &allocation.index, 4);
+                            std::memcpy(finalPushData.data() + offset + 4, &allocation.offset, 4);
+                            finalPushSize = std::max(finalPushSize, offset + 8);
+                        }
+                    }
+
+                    if (finalPushSize > 0) {
+                        vkCmd.setPushData(0, finalPushSize, finalPushData.data());
+                    }
+                    vkCmd.dispatch(state.x, state.y, state.z);
                 }
-                vkCmd.dispatch(state.x, state.y, state.z);
             }
         }
     }

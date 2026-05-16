@@ -60,6 +60,7 @@ namespace rhi::vk{
                 data
             );
         }
+        void copyBuffer(rhi::Buffer* src, rhi::Buffer* dst, size_t size, size_t srcOffset = 0, size_t dstOffset = 0) override;
     private:
         VulkanDevice& m_device;
         VulkanComputePipeline* m_pipeline = nullptr;
