@@ -136,6 +136,8 @@ void Renderer::render(float time) {
     // 5. 実行
     std::cout << "--- Executing Command List ---" << std::endl;
     auto cmd = m_device.createCommandList();
+    cmd->wait();
+    cmd->reset();
     cmd->begin();
     graph->execute(*cmd);
     cmd->end();
