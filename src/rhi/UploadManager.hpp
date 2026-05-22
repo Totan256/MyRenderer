@@ -34,8 +34,10 @@ namespace rhi {
         virtual SemaphoreHandle flushDeferredUploads() = 0;
         
         // ---------------------------------------------------------
-        // フレーム終了処理
+        // フレーム管理
         // ---------------------------------------------------------
-        virtual void garbageCollect(uint64_t completedFrameId) = 0;
+        // 毎フレームの開始時に呼び出し、そのフレームで使用するリソースをリセットする
+        // (呼び出し時点で、このフレームインデックスの過去のGPU実行は完了している前提)
+        virtual void beginFrame(uint64_t currentFrameIndex) = 0;
     };
 }

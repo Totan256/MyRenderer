@@ -102,6 +102,10 @@ namespace rhi::vk{
 
         const uint32_t MAX_BINDLESS_RESOURCES = 100000;
 
+        // Frame in Flight数 (初期化時に決定)
+        uint32_t m_framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+
         uint64_t m_frameCounter = 0;
         std::deque<DeletionEntry> m_deletionQueue;
         std::mutex m_deletionMutex;

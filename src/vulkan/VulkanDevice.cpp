@@ -16,6 +16,13 @@
 #include <vk_mem_alloc.h>
 namespace rhi::vk{
     void VulkanDevice::beginFrame() {
+        // [ToDo] 将来ここに対応するフレームのフェンス待機(vkWaitForFences)が入る
+
+        // 前フレームのGPU実行完了が保証されたタイミングで、
+        // UploadManager内のリソースを安全にリセット・再利用可能にする
+        if (m_uploadManager) {
+            m_uploadManager->beginFrame(m_frameCounter);
+        }
         std::lock_guard<std::mutex> lock(m_deletionMutex);
         while (!m_deletionQueue.empty() && m_deletionQueue.front().targetFrame <= m_frameCounter) {
             m_deletionQueue.front().func();
@@ -29,10 +36,6 @@ namespace rhi::vk{
     VulkanDevice::VulkanDevice() = default;
 
     void VulkanDevice::endFrame() {
-        if (m_uploadManager) {
-            // フレーム終了時に一時バッファを破棄
-            m_uploadManager->garbageCollect(m_frameCounter);
-        }
         m_frameCounter++;
     }
 
@@ -78,7 +81,7 @@ namespace rhi::vk{
         // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
         // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意またはconfigで指定できるようにする
         m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 65536, 2);
-        m_uploadManager = std::make_unique<VulkanUploadManager>(*this, 16 * 1024 * 1024);
+        m_uploadManager = std::make_unique<VulkanUploadManager>(*this, m_framesInFlight, 16 * 1024 * 1024);
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
     }
