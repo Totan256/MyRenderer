@@ -12,7 +12,7 @@ namespace rhi::vk{
 
     class VulkanCommandList : public CommandList {
     public:
-        VulkanCommandList(VulkanDevice& device);
+        VulkanCommandList(VulkanDevice& device, QueueType queueType);
         ~VulkanCommandList() override;
         
         // コマンド記録の開始と終了
@@ -67,6 +67,7 @@ namespace rhi::vk{
         void copyBuffer(rhi::Buffer* src, rhi::Buffer* dst, size_t size, size_t srcOffset = 0, size_t dstOffset = 0) override;
     private:
         VulkanDevice& m_device;
+        QueueType m_queueType;
         VulkanComputePipeline* m_pipeline = nullptr;
         VkCommandPool m_commandPool = VK_NULL_HANDLE;
         VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;

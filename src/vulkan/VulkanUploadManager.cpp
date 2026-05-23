@@ -1,24 +1,29 @@
 ﻿#include "VulkanUploadManager.hpp"
 #include <cstring>
 #include <iostream>
+#include <algorithm>
 
 namespace rhi::vk {
     VulkanUploadManager::VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize)
         : m_device(device), m_framesInFlight(framesInFlight) {
         
-        // --- Immediate用の初期化 ---
-        m_immediateState.ringBufferSize = ringBufferSize;
-        m_immediateState.ringBuffer = std::make_unique<VulkanBuffer>(
+        m_asyncState.ringBufferSize = ringBufferSize;
+        m_asyncState.ringBuffer = std::make_unique<VulkanBuffer>(
             m_device, m_device.getAllocator(), ringBufferSize,
             VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VMA_MEMORY_USAGE_CPU_TO_GPU
         );
-        m_immediateState.ringMappedPtr = static_cast<uint8_t*>(m_immediateState.ringBuffer->map());
-        m_immediateCmd = std::make_unique<VulkanCommandList>(m_device);
-        m_immediateCmd->reset();
-        m_immediateCmd->begin();
+        m_asyncState.ringMappedPtr = static_cast<uint8_t*>(m_asyncState.ringBuffer->map());
+        m_asyncState.cmdList = std::make_unique<VulkanCommandList>(m_device, QueueType::Transfer);
+        
+        m_asyncState.syncSemaphore = m_device.createSemaphore();
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        vkCreateFence(m_device.getDevice(), &fenceInfo, nullptr, &m_asyncState.syncFence);
 
-        // --- Deferred用の初期化 (フレーム数分) ---
+        m_asyncState.cmdList->reset();
+        m_asyncState.cmdList->begin();
+
         m_frameStates.resize(m_framesInFlight);
         for (uint32_t i = 0; i < m_framesInFlight; ++i) {
             auto& state = m_frameStates[i];
@@ -29,36 +34,19 @@ namespace rhi::vk {
                 VMA_MEMORY_USAGE_CPU_TO_GPU
             );
             state.ringMappedPtr = static_cast<uint8_t*>(state.ringBuffer->map());
-            
-            state.deferredCmd = std::make_unique<VulkanCommandList>(m_device);
-            // 最初はリセット済みの状態にしておく（実際のbeginはbeginFrameで行う）
-
-            // セマフォの作成
-            VkSemaphoreCreateInfo semaphoreInfo{};
-            semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            if (vkCreateSemaphore(m_device.getDevice(), &semaphoreInfo, nullptr, &state.transferSemaphore) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create transfer semaphore!");
-            }
         }
     }
 
     VulkanUploadManager::~VulkanUploadManager() {
-        waitForImmediateUploads();
-        // m_ringBufferはunique_ptrにより自動破棄
-        for (auto& state : m_frameStates) {
-            if (state.transferSemaphore != VK_NULL_HANDLE)
-                vkDestroySemaphore(m_device.getDevice(), state.transferSemaphore, nullptr);
-        }
+        ensureAsyncReady();
+        m_device.destroySemaphore(m_asyncState.syncSemaphore);
+        vkDestroyFence(m_device.getDevice(), m_asyncState.syncFence, nullptr);
     }
 
     StagingAllocation VulkanUploadManager::allocateStagingSpace(UploadState& state, size_t size, size_t alignment) {
-        // 閾値：リングバッファの4分の1を超える場合は専用バッファを作成
         const size_t THRESHOLD = state.ringBufferSize / 4;
-
-        // 指定されたアライメントに合わせてオフセットを切り上げる
         size_t allocOffset = (state.ringBufferOffset + alignment - 1) & ~(alignment - 1);
 
-        // 1. データが巨大、またはリングバッファに空きがない場合
         if (size > THRESHOLD || allocOffset + size > state.ringBufferSize) {
             auto tempBuf = std::make_unique<VulkanBuffer>(
                 m_device, m_device.getAllocator(), size,
@@ -68,91 +56,99 @@ namespace rhi::vk {
             void* ptr = tempBuf->map();
             VulkanBuffer* rawPtr = tempBuf.get();
             state.pendingTemporaryBuffers.push_back(std::move(tempBuf));
-            
             return { rawPtr, 0, ptr, true };
         }
 
-        // 2. リングバッファを使用する場合
         void* ptr = state.ringMappedPtr + allocOffset;
         state.ringBufferOffset = allocOffset + size;
-
         return { state.ringBuffer.get(), allocOffset, ptr, false };
     }
 
-    // =========================================================
-    // Immediate Operations
-    // =========================================================
+    void VulkanUploadManager::ensureAsyncReady() {
+        if (m_asyncState.isSubmitted) {
+            vkWaitForFences(m_device.getDevice(), 1, &m_asyncState.syncFence, VK_TRUE, UINT64_MAX);
+            vkResetFences(m_device.getDevice(), 1, &m_asyncState.syncFence);
+            m_asyncState.pendingTemporaryBuffers.clear();
+            m_asyncState.ringBufferOffset = 0;
+            m_asyncState.cmdList->reset();
+            m_asyncState.cmdList->begin();
+            m_asyncState.isSubmitted = false;
+        }
+    }
 
-    void* VulkanUploadManager::mapForUploadImmediate(Buffer* dstBuffer, size_t size) {
-        StagingAllocation alloc = allocateStagingSpace(m_immediateState, size);
-        m_immediateCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
+    void VulkanUploadManager::flushAsync(Buffer* dstBuffer, UploadMode mode) {
+        m_asyncState.cmdList->end();
+        vkResetFences(m_device.getDevice(), 1, &m_asyncState.syncFence);
+        
+        VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        VkCommandBuffer cmdBuf = m_asyncState.cmdList->getCommandBuffer();
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &cmdBuf;
+        
+        if (mode == UploadMode::Async) {
+            submitInfo.signalSemaphoreCount = 1;
+            submitInfo.pSignalSemaphores = &m_asyncState.syncSemaphore;
+            // マップに記録し、あとでレンダーグラフに回収させる
+            m_pendingAsyncSemaphores[dstBuffer] = m_asyncState.syncSemaphore;
+        }
+
+        vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, m_asyncState.syncFence);
+        m_asyncState.isSubmitted = true;
+
+        if (mode == UploadMode::Immediate) {
+            ensureAsyncReady(); // Immediateならその場でCPU待機
+        }
+    }
+
+    void VulkanUploadManager::uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode) {
+        if (mode == UploadMode::Deferred) {
+            auto& state = m_frameStates[m_currentFrameIndex];
+            StagingAllocation alloc = allocateStagingSpace(state, size);
+            std::memcpy(alloc.mappedPtr, data, size);
+            state.pendingUploads.push_back({alloc.buffer, alloc.offset, dstBuffer, size});
+        } else {
+            ensureAsyncReady();
+            StagingAllocation alloc = allocateStagingSpace(m_asyncState, size);
+            std::memcpy(alloc.mappedPtr, data, size);
+            m_asyncState.cmdList->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
+            flushAsync(dstBuffer, mode);
+        }
+    }
+
+    void* VulkanUploadManager::mapForDeferredUpload(Buffer* dstBuffer, size_t size) {
+        auto& state = m_frameStates[m_currentFrameIndex];
+        StagingAllocation alloc = allocateStagingSpace(state, size);
+        state.pendingUploads.push_back({alloc.buffer, alloc.offset, dstBuffer, size});
         return alloc.mappedPtr;
     }
 
-    void VulkanUploadManager::uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) {
-        StagingAllocation alloc = allocateStagingSpace(m_immediateState, size);
-        std::memcpy(alloc.mappedPtr, data, size);
-        m_immediateCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
+    std::vector<SemaphoreHandle> VulkanUploadManager::consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) {
+        std::vector<SemaphoreHandle> sems;
+        for (auto buf : buffers) {
+            auto it = m_pendingAsyncSemaphores.find(buf);
+            if (it != m_pendingAsyncSemaphores.end()) {
+                sems.push_back(it->second);
+                m_pendingAsyncSemaphores.erase(it); // 回収したら消す
+            }
+        }
+        // 重複セマフォの除去
+        std::sort(sems.begin(), sems.end());
+        sems.erase(std::unique(sems.begin(), sems.end()), sems.end());
+        return sems;
     }
-
-    void VulkanUploadManager::waitForImmediateUploads() {
-        m_immediateCmd->end();
-        m_immediateCmd->submitAndWait(); // 同期待機
-
-        m_immediateState.pendingTemporaryBuffers.clear(); // 一時バッファの破棄
-        m_immediateState.ringBufferOffset = 0;            // リングバッファのリセット
-        
-        m_immediateCmd->reset(); // 次の記録に備える
-        m_immediateCmd->begin(); 
-    }
-
-    // =========================================================
-    // Deferred Operations (Per Frame)
-    // =========================================================
 
     void VulkanUploadManager::beginFrame(uint64_t currentFrameIndex) {
         m_currentFrameIndex = currentFrameIndex % m_framesInFlight;
         auto& state = m_frameStates[m_currentFrameIndex];
-        
-        // この時点で、このフレームインデックスの過去のGPU実行は完了しているはずなのでクリア
         state.pendingTemporaryBuffers.clear();
         state.ringBufferOffset = 0;
-        state.hasDeferredCommands = false;
-
-        // コマンドバッファをリセットして記録開始状態にする
-        state.deferredCmd->reset();
-        state.deferredCmd->begin();
+        state.pendingUploads.clear();
     }
 
-    void VulkanUploadManager::requestUploadDeferred(Buffer* dstBuffer, const void* data, size_t size) {
+    std::vector<UploadRequest> VulkanUploadManager::getAndClearPendingUploads() {
         auto& state = m_frameStates[m_currentFrameIndex];
-        StagingAllocation alloc = allocateStagingSpace(state, size);
-        std::memcpy(alloc.mappedPtr, data, size);
-        state.deferredCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
-        state.hasDeferredCommands = true;
+        auto res = std::move(state.pendingUploads);
+        state.pendingUploads.clear();
+        return res;
     }
-
-    void* VulkanUploadManager::mapForUploadDeferred(Buffer* dstBuffer, size_t size) {
-        auto& state = m_frameStates[m_currentFrameIndex];
-        StagingAllocation alloc = allocateStagingSpace(state, size);
-        state.deferredCmd->copyBuffer(alloc.buffer, dstBuffer, size, alloc.offset, 0);
-        state.hasDeferredCommands = true;
-        return alloc.mappedPtr;
-    }
-
-    SemaphoreHandle VulkanUploadManager::flushDeferredUploads() {
-        auto& state = m_frameStates[m_currentFrameIndex];
-        if (!state.hasDeferredCommands) return nullptr;
-        // 記録を終了してGPUへ送信
-        state.deferredCmd->end();
-        state.deferredCmd->submit(nullptr, state.transferSemaphore);
-        state.hasDeferredCommands = false;
-        // 抽象ハンドルとしてセマフォを返す
-        return static_cast<SemaphoreHandle>(state.transferSemaphore);
-    }
-    // void VulkanUploadManager::garbageCollect(uint64_t completedFrameId) {
-    //     // RenderGraphの実行完了後に呼ばれる
-    //     m_pendingTemporaryBuffers.clear();
-    //     m_ringBufferOffset = 0; // リングバッファリセット
-    // }
 }

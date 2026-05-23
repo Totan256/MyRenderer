@@ -5,6 +5,7 @@
 #include "VulkanCommandList.hpp"
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 namespace rhi::vk {
     struct StagingAllocation {
@@ -14,7 +15,6 @@ namespace rhi::vk {
         bool isTemporary; 
     };
 
-    // アップロード用バッファの状態を管理する基底構造体
     struct UploadState {
         std::unique_ptr<VulkanBuffer> ringBuffer;
         size_t ringBufferSize = 0;
@@ -23,11 +23,15 @@ namespace rhi::vk {
         std::vector<std::unique_ptr<VulkanBuffer>> pendingTemporaryBuffers;
     };
 
-    // ループ中の遅延アップロード用（フレームごとに持つ）
+    struct AsyncUploadState : public UploadState {
+        std::unique_ptr<VulkanCommandList> cmdList;
+        VkSemaphore syncSemaphore = VK_NULL_HANDLE;
+        VkFence syncFence = VK_NULL_HANDLE;
+        bool isSubmitted = false; 
+    };
+
     struct PerFrameUploadState : public UploadState {
-        std::unique_ptr<VulkanCommandList> deferredCmd;
-        VkSemaphore transferSemaphore = VK_NULL_HANDLE;
-        bool hasDeferredCommands = false;
+        std::vector<UploadRequest> pendingUploads;
     };
 
     class VulkanUploadManager : public UploadManager {
@@ -35,14 +39,12 @@ namespace rhi::vk {
         VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize);
         ~VulkanUploadManager() override;
 
-        void* mapForUploadImmediate(Buffer* dstBuffer, size_t size) override;
-        void uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) override;
-        void waitForImmediateUploads() override;
-
-        void* mapForUploadDeferred(Buffer* dstBuffer, size_t size) override;
-        void requestUploadDeferred(Buffer* dstBuffer, const void* data, size_t size) override;
-
-        SemaphoreHandle flushDeferredUploads() override;
+        void* mapForDeferredUpload(Buffer* dstBuffer, size_t size) override;
+        void uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode = UploadMode::Deferred) override;
+        
+        std::vector<SemaphoreHandle> consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) override;
+        
+        std::vector<UploadRequest> getAndClearPendingUploads() override;
         void beginFrame(uint64_t currentFrameIndex) override;
 
     private:
@@ -50,29 +52,12 @@ namespace rhi::vk {
         uint32_t m_framesInFlight;
         uint32_t m_currentFrameIndex = 0;
 
-        // Immediate (即時) 用の独立したステート
-        UploadState m_immediateState;
-        std::unique_ptr<VulkanCommandList> m_immediateCmd;
-
-        // Deferred (遅延) 用のフレームごとのステート
+        AsyncUploadState m_asyncState; // ImmediateとAsyncで共用
         std::vector<PerFrameUploadState> m_frameStates;
+        std::unordered_map<Buffer*, VkSemaphore> m_pendingAsyncSemaphores; // バッファとセマフォの紐付け
 
-        // アライメントを指定してステージング領域を確保する内部関数
         StagingAllocation allocateStagingSpace(UploadState& state, size_t size, size_t alignment = 4);
-        
-        // std::unique_ptr<VulkanBuffer> m_ringBuffer;
-        // size_t m_ringBufferSize;
-        // size_t m_ringBufferOffset = 0;
-        // uint8_t* m_ringMappedPtr = nullptr;
-
-        // std::unique_ptr<VulkanCommandList> m_deferredCmd;
-        // bool m_hasDeferredCommands = false;
-
-        // // 同期用のVulkan Semaphore
-        // VkSemaphore m_transferSemaphore = VK_NULL_HANDLE;
-
-        // std::vector<std::unique_ptr<VulkanBuffer>> m_pendingTemporaryBuffers;
-
-        // StagingAllocation allocateStagingSpace(size_t size);
+        void ensureAsyncReady(); 
+        void flushAsync(Buffer* dstBuffer, UploadMode mode);
     };
 }

@@ -3,7 +3,9 @@
 #include <stdexcept>
 #include <iostream>
 namespace rhi::vk {
-    VulkanCommandList::VulkanCommandList(VulkanDevice& device) : m_device(device) {
+    VulkanCommandList::VulkanCommandList(VulkanDevice& device, QueueType queueType)
+        : m_device(device), m_queueType(queueType) {
+
         VkDevice logicalDevice = m_device.getDevice();
 
         // 1. コマンドプールの作成
@@ -11,7 +13,7 @@ namespace rhi::vk {
         VkCommandPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        poolInfo.queueFamilyIndex = m_device.getComputeQueueFamilyIndex();
+        poolInfo.queueFamilyIndex = m_device.getQueueFamilyIndex(queueType);
 
         if (vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create command pool!");
@@ -89,7 +91,7 @@ namespace rhi::vk {
         }
 
         // m_fence を渡して実行。完了するとフェンスがシグナル状態になるが、CPUでは待たない
-        if (vkQueueSubmit(m_device.getComputeQueue(), 1, &submitInfo, m_fence) != VK_SUCCESS) {
+        if (vkQueueSubmit(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit command buffer!");
         }
     }
@@ -108,7 +110,7 @@ namespace rhi::vk {
         submitInfo.pCommandBuffers = &m_commandBuffer;
 
         // フェンスを渡して実行。完了するとフェンスがシグナル状態になる
-        if (vkQueueSubmit(m_device.getComputeQueue(), 1, &submitInfo, m_fence) != VK_SUCCESS) {
+        if (vkQueueSubmit(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
 

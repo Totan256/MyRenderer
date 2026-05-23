@@ -55,6 +55,7 @@ namespace rhi {
         virtual PassBuilder& bind(uint32_t offset, ResourceState state) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
+        virtual PassBuilder& forceBatchBreak() = 0;
 
     protected:
     };
@@ -86,10 +87,12 @@ namespace rhi {
         std::string name;
         std::string shaderPath;
         PassType type = PassType::Compute;
+        QueueType queueType = QueueType::Compute;
         // パスのシグネチャ (オフセット -> Usage)
         std::map<uint32_t, ResourceState> signature;
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
+        bool forceBatchBreak = false; // このパスの前でバッチを分割するフラグ
         
         struct DispatchState {
             uint32_t id;
@@ -121,14 +124,14 @@ namespace rhi {
             m_bindGroups.push_back(std::make_unique<BindGroup>(bindings));
             return *m_bindGroups.back();
         }
-        virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath) = 0;
-        virtual void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size) = 0;
+        virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) = 0;
+        virtual void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType) = 0;
 
         // バリアの計算
         virtual void compile() = 0;
 
         // 実際のコマンド発行
-        virtual void execute(CommandList& cmd) = 0;
+        virtual void execute(const std::vector<SemaphoreHandle>& waitSemaphores = {}) = 0;
 
         virtual uint32_t getPhysicalIndex(ResourceHandle handle) = 0;
     private:

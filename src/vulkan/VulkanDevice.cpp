@@ -16,7 +16,9 @@
 #include <vk_mem_alloc.h>
 namespace rhi::vk{
     void VulkanDevice::beginFrame() {
-        // [ToDo] 将来ここに対応するフレームのフェンス待機(vkWaitForFences)が入る
+        // 現在のフレームのフェンスを待機・リセット
+        vkWaitForFences(m_device, 1, &m_inFlightFences[m_frameCounter % m_framesInFlight], VK_TRUE, UINT64_MAX);
+        vkResetFences(m_device, 1, &m_inFlightFences[m_frameCounter % m_framesInFlight]);
 
         // 前フレームのGPU実行完了が保証されたタイミングで、
         // UploadManager内のリソースを安全にリセット・再利用可能にする
@@ -39,6 +41,11 @@ namespace rhi::vk{
         m_frameCounter++;
     }
 
+    void VulkanDevice::waitForFrame(uint64_t frameIndex) {
+        uint32_t index = frameIndex % m_framesInFlight;
+        vkWaitForFences(m_device, 1, &m_inFlightFences[index], VK_TRUE, UINT64_MAX);
+    }
+
     void VulkanDevice::enqueueDeletion(std::function<void()>&& deletionFunc) {
         std::lock_guard<std::mutex> lock(m_deletionMutex);
         m_deletionQueue.push_back({ m_frameCounter + MAX_FRAMES_IN_FLIGHT, std::move(deletionFunc) });
@@ -59,8 +66,8 @@ namespace rhi::vk{
     std::unique_ptr<RenderGraph> VulkanDevice::createRenderGraph(){
         return std::make_unique<VulkanRenderGraph>(*this);
     }
-    std::unique_ptr<rhi::CommandList> VulkanDevice::createCommandList() {
-        return std::make_unique<VulkanCommandList>(*this);
+    std::unique_ptr<rhi::CommandList> VulkanDevice::createCommandList(QueueType queueType) {
+        return std::make_unique<VulkanCommandList>(*this, queueType);
     }
 
     void VulkanDevice::initialize(){
@@ -82,6 +89,15 @@ namespace rhi::vk{
         // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意またはconfigで指定できるようにする
         m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 65536, 2);
         m_uploadManager = std::make_unique<VulkanUploadManager>(*this, m_framesInFlight, 16 * 1024 * 1024);
+
+        // FIF用フェンスの作成
+        m_inFlightFences.resize(m_framesInFlight);
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // 最初はシグナル状態
+        for (uint32_t i = 0; i < m_framesInFlight; i++) {
+            VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]));
+        }
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
     }
@@ -257,17 +273,30 @@ namespace rhi::vk{
 
 
     VulkanDevice::~VulkanDevice(){
+        // 1. 全てのGPU処理が終わるまで安全に待機
+        vkDeviceWaitIdle(m_device);
+        // 2. マネージャ系の破棄（内部で保持しているCommandList等のフェンスもここで安全に破棄される）
         m_constantBufferManager.reset();
         m_uploadManager.reset();
-        // すべてのリソースが解放されるのを待機
-        m_frameCounter += MAX_FRAMES_IN_FLIGHT + 1;
-        beginFrame();
-
+        // 3. 削除キューに溜まっている遅延破棄タスク(画像やバッファなど)をすべて強制実行してクリーンアップ
+        for (auto& entry : m_deletionQueue) {
+            entry.func();
+        }
+        m_deletionQueue.clear();
+        // 4. FIF用フェンスの破棄（エラーの原因だった部分）
+        for (VkFence fence : m_inFlightFences) {
+            if (fence != VK_NULL_HANDLE) {
+                vkDestroyFence(m_device, fence, nullptr);
+            }
+        }
+        m_inFlightFences.clear();
+        // 5. Vulkanコアオブジェクトの破棄
         if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
         if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
         if (m_allocator) vmaDestroyAllocator(m_allocator);
         if (m_device) vkDestroyDevice(m_device, nullptr);
         if (m_instance) vkDestroyInstance(m_instance, nullptr);
+        
         std::cout << "VulkanDevice destroyed." << std::endl;
     }
 
@@ -416,5 +445,28 @@ namespace rhi::vk{
         write.pBufferInfo = &bufferInfo;
         vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
         return index;
+    }
+
+    VkQueue VulkanDevice::getQueue(QueueType type) const {
+        // Todo 将来GraphicsやCopyも対応する場合はtypeに応じて適切なキューを返すようにする
+        return m_computeQueue;
+    }
+    
+    uint32_t VulkanDevice::getQueueFamilyIndex(QueueType type) const {
+        return m_computeQueueFamilyIndex;
+    }
+
+    VkSemaphore VulkanDevice::createSemaphore() {
+        VkSemaphoreCreateInfo info{};
+        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkSemaphore sem;
+        VK_CHECK(vkCreateSemaphore(m_device, &info, nullptr, &sem));
+        return sem;
+    }
+
+    void VulkanDevice::destroySemaphore(VkSemaphore semaphore) {
+        if (semaphore != VK_NULL_HANDLE) {
+            vkDestroySemaphore(m_device, semaphore, nullptr);
+        }
     }
 }

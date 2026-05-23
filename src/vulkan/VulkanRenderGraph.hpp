@@ -18,23 +18,35 @@ namespace rhi::vk {
         std::vector<VkBufferMemoryBarrier2> bufferBarriers;
     };
 
+    struct RenderBatch {
+        QueueType queueType;
+        std::vector<uint32_t> passIndices;
+        std::vector<VkSemaphore> waitSemaphores;
+        std::vector<VkPipelineStageFlags> waitStages;
+        std::vector<VkSemaphore> signalSemaphores;
+        std::unique_ptr<VulkanCommandList> cmdList;
+    };
+
     class VulkanRenderGraph : public RenderGraph {
     public:
         VulkanRenderGraph(VulkanDevice& device): m_device(device), m_resourceAllocator(device){
-        }    
+        }
+        ~VulkanRenderGraph() {
+            clearBatchSemaphores();
+        }
 
-        PassBuilder& addPass(const std::string& name, const std::string& shaderPath) override;
+        PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;
         ResourceHandle importResource(Resource* res) override;
         ResourceHandle createImage(const ImageDesc& desc) override;
         ResourceHandle createBuffer(const BufferDesc& desc) override;
         uint32_t getPhysicalIndex(ResourceHandle handle) override;
 
-        void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size) override;
+        void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType) override;
 
         // バリア決定アルゴリズム
         void compile() override;
 
-        void execute(rhi::CommandList& cmd) override;
+        void execute(const std::vector<SemaphoreHandle>& waitSemaphores) override;
 
         DispatchObject& createDispatch(LogicalPass& node, uint32_t x, uint32_t y, uint32_t z);
     private:
@@ -45,6 +57,18 @@ namespace rhi::vk {
         VulkanResourceAllocator m_resourceAllocator;
         VulkanDevice& m_device;
         std::vector<uint32_t> m_sortedIndices;
+        // ハンドル逆引き用
+        std::map<Resource*, ResourceHandle> m_physicalToHandle;
+
+        std::vector<RenderBatch> m_batches;
+        std::vector<VkSemaphore> m_batchSemaphores;
+
+        void clearBatchSemaphores() {
+            for (VkSemaphore sem : m_batchSemaphores) {
+                m_device.destroySemaphore(sem);
+            }
+            m_batchSemaphores.clear();
+        }
     };
     
 }

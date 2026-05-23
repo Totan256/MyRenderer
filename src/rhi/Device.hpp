@@ -19,13 +19,14 @@ namespace rhi {
         // フレーム管理
         virtual void beginFrame() = 0;
         virtual void endFrame() = 0;
+        virtual void waitForFrame(uint64_t frameIndex) = 0;
         virtual uint64_t getCurrentFrame() const = 0;
 
         // リソース作成ファクトリ
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
         virtual std::unique_ptr<Image> createImage(const ImageDesc& desc) = 0;
         virtual std::unique_ptr<RenderGraph> createRenderGraph() = 0; // 必要に応じて追加
-        virtual std::unique_ptr<CommandList> createCommandList() = 0;
+        virtual std::unique_ptr<CommandList> createCommandList(QueueType queueType = QueueType::Compute) = 0;
 
         // アップロードマネージャーの取得
         virtual UploadManager* getUploadManager() = 0;

@@ -40,7 +40,9 @@ namespace rhi::vk{
         // フレーム管理
         void beginFrame() override;
         void endFrame() override;
+        void waitForFrame(uint64_t frameIndex) override;
         uint64_t getCurrentFrame() const override { return m_frameCounter; }
+        VkFence getCurrentFrameFence() const { return m_inFlightFences[m_frameCounter % m_framesInFlight]; }
 
         // 削除キュー
         void enqueueDeletion(std::function<void()>&& deletionFunc) override;
@@ -48,7 +50,7 @@ namespace rhi::vk{
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<Image> createImage(const ImageDesc& desc) override;
         std::unique_ptr<RenderGraph> createRenderGraph() override;
-        std::unique_ptr<rhi::CommandList> createCommandList() override;
+        std::unique_ptr<rhi::CommandList> createCommandList(QueueType queueType = QueueType::Compute) override;
         
 
         // 生のハンドル取得（拡張性のため）
@@ -56,9 +58,13 @@ namespace rhi::vk{
         VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
         VmaAllocator getAllocator() const { return m_allocator; }
         
-        // 計算用キューの取得（Compute Shader用）
-        VkQueue getComputeQueue() const { return m_computeQueue; }
-        uint32_t getComputeQueueFamilyIndex() const { return m_computeQueueFamilyIndex; }
+        // キューの取得
+        VkQueue getQueue(QueueType type) const;
+        uint32_t getQueueFamilyIndex(QueueType type) const;
+        
+        // セマフォの生成と破棄 (RenderGraph用)
+        VkSemaphore createSemaphore();
+        void destroySemaphore(VkSemaphore semaphore);
 
         // Bindless用のセットとレイアウトを取得
         VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
@@ -104,8 +110,7 @@ namespace rhi::vk{
 
         // Frame in Flight数 (初期化時に決定)
         uint32_t m_framesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-
+        std::vector<VkFence> m_inFlightFences;
         uint64_t m_frameCounter = 0;
         std::deque<DeletionEntry> m_deletionQueue;
         std::mutex m_deletionMutex;

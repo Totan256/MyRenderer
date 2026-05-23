@@ -4,40 +4,32 @@
 #include "Resource.hpp"
 
 namespace rhi {
+    struct UploadRequest {
+        Buffer* stagingBuffer;
+        size_t stagingOffset;
+        Buffer* dstBuffer;
+        size_t size;
+    };
+
+    enum class UploadMode {
+        Deferred,    // RenderGraphのコンパイル時にCopyパスとして組み込む
+        Async,       // 即座にTransfer Queueに発行し、グラフが自動でセマフォ待機する
+        Immediate    // 即座にTransfer Queueに発行し、CPUで完了を待機する（ロード画面等）
+    };
+
     class UploadManager {
     public:
         virtual ~UploadManager() = default;
 
-        // ---------------------------------------------------------
-        // 1. 即時インポート (ロード画面・初期化用)
-        // ---------------------------------------------------------
-        // ステージングメモリを確保し、CPUから直接書き込めるポインタを返す
-        virtual void* mapForUploadImmediate(Buffer* dstBuffer, size_t size) = 0;
+        virtual void uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode = UploadMode::Deferred) = 0;
         
-        // データを渡してコピーする便利関数
-        virtual void uploadImmediate(Buffer* dstBuffer, const void* data, size_t size) = 0;
+        // ※Deferredモードのみサポート (Immediate/Asyncでマップを使う場合は別途flush/unmapの設計が必要なため)
+        virtual void* mapForDeferredUpload(Buffer* dstBuffer, size_t size) = 0;
         
-        // これまでに積んだ即時インポートコマンドを送信し、CPUで完了を待機する
-        virtual void waitForImmediateUploads() = 0;
+        // RenderGraphがコンパイル時に、使用されるバッファの非同期セマフォを回収するための関数
+        virtual std::vector<SemaphoreHandle> consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) = 0;
 
-        // ---------------------------------------------------------
-        // 2. 遅延インポート (ゲームループ用)
-        // ---------------------------------------------------------
-        // ステージングメモリを確保し、直接書き込めるポインタを返す
-        virtual void* mapForUploadDeferred(Buffer* dstBuffer, size_t size) = 0;
-        
-        // データコピー版
-        virtual void requestUploadDeferred(Buffer* dstBuffer, const void* data, size_t size) = 0;
-
-        // 遅延コマンドをGPUに送信し、完了時にシグナルされるSemaphoreを返す
-        // CPUは待機せず、後続の描画コマンドがこのSemaphoreをWaitする
-        virtual SemaphoreHandle flushDeferredUploads() = 0;
-        
-        // ---------------------------------------------------------
-        // フレーム管理
-        // ---------------------------------------------------------
-        // 毎フレームの開始時に呼び出し、そのフレームで使用するリソースをリセットする
-        // (呼び出し時点で、このフレームインデックスの過去のGPU実行は完了している前提)
+        virtual std::vector<UploadRequest> getAndClearPendingUploads() = 0;
         virtual void beginFrame(uint64_t currentFrameIndex) = 0;
     };
 }

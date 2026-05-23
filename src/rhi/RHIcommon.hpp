@@ -3,6 +3,12 @@
 namespace rhi {
     using SemaphoreHandle = void*;// 同期用の抽象ハンドル
 
+    enum class QueueType {
+        Graphics,
+        Compute,
+        Transfer
+    };
+
     enum class BufferUsageFlags : uint32_t {
         None          = 0,
         TransferSrc   = 1 << 0,
