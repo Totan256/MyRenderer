@@ -18,6 +18,9 @@ namespace rhi::vk{
         //VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
 
         uint32_t getPushContentsSize() const {return m_pushContentsSize;}
+        // ファイル読み込みヘルパー
+        static std::vector<uint32_t> readFile(const std::string& filename);
+        static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath);
     private:
         VulkanDevice& m_device; // デバイスへの参照を保持
         const uint32_t m_pushContentsSize;
@@ -27,9 +30,6 @@ namespace rhi::vk{
         //VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
         VkShaderModule m_shaderModule = VK_NULL_HANDLE;
 
-        // ファイル読み込みヘルパー
-        static std::vector<uint32_t> readFile(const std::string& filename);
-        static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath);
 
         void createPipeline(const std::string& shaderPath);
     };

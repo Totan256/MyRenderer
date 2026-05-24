@@ -7,6 +7,7 @@
 #include "RHIForward.hpp"
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanConstantBufferManager.hpp"
+#include "ShaderReflection.hpp"
 #include <map>
 #include <queue>
 #include <vector>
@@ -19,8 +20,9 @@
 namespace rhi::vk {
     class VulkanDispatchObject : public DispatchObject {
     public:
-        VulkanDispatchObject(LogicalPass& node, LogicalPass::DispatchState& ds, VulkanDevice& device) 
-            : m_node(node), m_ds(ds), m_device(device) {}
+        VulkanDispatchObject(LogicalPass& node, LogicalPass::DispatchState& ds, VulkanRenderGraph& graph) 
+            : m_node(node), m_ds(ds), m_graph(graph) {}
+        
         ~VulkanDispatchObject(){}
         DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) override{
             if (offset + size > MAX_PUSH_CONSTANT_SIZE) throw std::runtime_error("Push constants limit exceeded!");
@@ -28,7 +30,16 @@ namespace rhi::vk {
             m_ds.pushDataSize = std::max(m_ds.pushDataSize, static_cast<uint32_t>(offset + size));
             return *this;
         }
-        DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) override{
+        DispatchObject& read(ResourceHandle handle) override {
+            return bindByHash(handle, rhi::ResourceState::StorageRead);
+        }
+        DispatchObject& write(ResourceHandle handle) override {
+            return bindByHash(handle, rhi::ResourceState::StorageWrite);
+        }
+        DispatchObject& readUniform(ResourceHandle handle) override {
+            return bindByHash(handle, rhi::ResourceState::ConstantBuffer);
+        }
+        void updateResource(uint32_t offset, ResourceHandle handle){
             // 簡易バリデーション: パスのbind()で宣言されていないオフセットへのセットを弾く
             if (m_node.signature.find(offset) == m_node.signature.end()) {
                 throw std::runtime_error("Cannot set resource: offset " + std::to_string(offset) + 
@@ -36,15 +47,12 @@ namespace rhi::vk {
             }
             // ToDo: 将来的には m_node.signature[offset] (要求Usage) と registry[handle] でisCompatibleによる互換性チェックを追加
             m_ds.resourceOffsets[offset] = handle;
-            return *this;
+            return;
         }
-        DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) override {
-            // 静的Uniformはバッファ自体がリソースとして存在するため、通常のupdateResourceと同じ扱いでバインドレスインデックスを渡す。
-            m_ds.resourceOffsets[offset] = handle;
-            return *this;
-        }
-        DispatchObject& setUniformRaw(uint32_t offset, const void* data, size_t size) override {
-            auto& vec = m_ds.dynamicUniforms[offset];
+        DispatchObject& setUniformRaw(StringHash nameHash, const void* data, size_t size) override {
+            auto it = m_node.pushConstantOffsets.find(nameHash);
+            if (it == m_node.pushConstantOffsets.end()) throw std::runtime_error("Uniform not found in shader!");
+            auto& vec = m_ds.dynamicUniforms[it->second];
             vec.resize(size);
             std::memcpy(vec.data(), data, size);
             return *this;
@@ -56,9 +64,21 @@ namespace rhi::vk {
             return *this;
         }
     private:
+        VulkanRenderGraph& m_graph;
         LogicalPass& m_node;
         LogicalPass::DispatchState& m_ds;
-        VulkanDevice& m_device;
+        
+        DispatchObject& bindByHash(ResourceHandle handle, rhi::ResourceState state) {
+            StringHash nameHash = m_graph.getRegistration(handle).nameHash;
+            auto it = m_node.pushConstantOffsets.find(nameHash);
+            if (it == m_node.pushConstantOffsets.end()) {
+                throw std::runtime_error("Resource name not found in shader push constants!");
+            }
+            uint32_t offset = it->second;
+            m_node.signature[offset] = state; // Usageを自動セット
+            updateResource(offset, handle);
+            return *this;
+        }
     };
 
     
@@ -79,6 +99,12 @@ namespace rhi::vk {
         DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) override {
             return m_graph.createDispatch(m_node, x, y, z);
         }
+        DispatchObject& dispatchThreads(uint32_t width, uint32_t height, uint32_t depth) {
+            uint32_t gx = (width + m_node.localSizeX - 1) / m_node.localSizeX;
+            uint32_t gy = (height + m_node.localSizeY - 1) / m_node.localSizeY;
+            uint32_t gz = (depth + m_node.localSizeZ - 1) / m_node.localSizeZ;
+            return m_graph.createDispatch(m_node, gx, gy, gz);
+        }
         PassBuilder& forceBatchBreak() override {
             m_node.forceBatchBreak = true;
             return *this;
@@ -90,12 +116,16 @@ namespace rhi::vk {
     };
 
     DispatchObject& VulkanRenderGraph::createDispatch(LogicalPass& node, uint32_t x, uint32_t y, uint32_t z) {
-        node.dispatchStates.push_back({});
+        if (node.dispatchStates.empty()) {
+            node.dispatchStates.push_back({});
+        } else {
+            node.dispatchStates.push_back(node.dispatchStates.back());
+        }
         auto& ds = node.dispatchStates.back();
         ds.id = static_cast<uint32_t>(node.dispatchStates.size() - 1);
         ds.x = x; ds.y = y; ds.z = z;
         
-        m_dispatchObjects.push_back(std::make_unique<VulkanDispatchObject>(node, ds, m_device));
+        m_dispatchObjects.push_back(std::make_unique<VulkanDispatchObject>(node, ds, *this));
         return *m_dispatchObjects.back();
     }
     PassBuilder& VulkanRenderGraph::addPass(const std::string& name, const std::string& shaderPath, QueueType queueType) {
@@ -103,30 +133,44 @@ namespace rhi::vk {
         auto& node = m_logicalNodes.back();
         node.name = name;
         node.shaderPath = shaderPath;
-        node.queueType = queueType;
-        node.type = PassType::Compute; // Todo shaderPathの拡張子やユーザ指定でGraphicsもサポート
-        
+
+        // リフレクション実行
+        if (shaderPath.ends_with(".comp")) { // TODO: SPV対応
+            auto spirv = VulkanComputePipeline::compileGLSLToSPIRV(shaderPath);
+            std::cout << "Compiled shader to SPIR-V: " << shaderPath << " (size: " << spirv.size() * sizeof(uint32_t) << " bytes)" << std::endl;
+            auto reflection = ShaderReflection::reflect(spirv);
+            
+            node.type = reflection.passType;
+            node.queueType = queueType; // 引数優先
+            node.localSizeX = reflection.localSizeX;
+            node.localSizeY = reflection.localSizeY;
+            node.localSizeZ = reflection.localSizeZ;
+            node.pushConstantOffsets = reflection.pushConstantOffsets;
+            std::cout << "Reflected shader: " << shaderPath << " (localSize: " << node.localSizeX << "," << node.localSizeY << "," << node.localSizeZ << ")" << std::endl;
+
+        }
+
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
     }
-    ResourceHandle VulkanRenderGraph::importResource(Resource* res) {
+    ResourceHandle VulkanRenderGraph::importResource(Resource* res, StringHash nameHash) {
         if (m_physicalToHandle.count(res)) {
             return m_physicalToHandle[res];
         }
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
-        ResourceRegistration reg{}; reg.isImported = true; reg.physicalResource = res;
+        ResourceRegistration reg{}; reg.isImported = true; reg.physicalResource = res; reg.nameHash = nameHash;
         m_resourceRegistry.push_back(reg); 
         m_physicalToHandle[res] = handle;
         return handle;
     }
-    ResourceHandle VulkanRenderGraph::createImage(const ImageDesc& desc) {
+    ResourceHandle VulkanRenderGraph::createImage(const ImageDesc& desc, StringHash nameHash) {
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
-        ResourceRegistration reg{}; reg.isImported = false; reg.desc = desc;
+        ResourceRegistration reg{}; reg.isImported = false; reg.desc = desc; reg.nameHash = nameHash;
         m_resourceRegistry.push_back(reg); return handle;
     }
-    ResourceHandle VulkanRenderGraph::createBuffer(const BufferDesc& desc) {
+    ResourceHandle VulkanRenderGraph::createBuffer(const BufferDesc& desc, StringHash nameHash) {
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
-        ResourceRegistration reg{}; reg.isImported = false; reg.desc = desc;
+        ResourceRegistration reg{}; reg.isImported = false; reg.desc = desc; reg.nameHash = nameHash;
         m_resourceRegistry.push_back(reg); return handle;
     }
     uint32_t VulkanRenderGraph::getPhysicalIndex(ResourceHandle handle) {
@@ -202,7 +246,7 @@ namespace rhi::vk {
         for (size_t passIndex = 0; passIndex < m_logicalNodes.size(); ++passIndex) {
             auto& node = m_logicalNodes[passIndex];
             
-            // パイプラインの作成・キャッシュ
+            // パイプラインの作成・キャッシュ //Todo あとでリフレクションのときにまとめて行う
             if (!node.shaderPath.empty() && m_pipelines.find(node.shaderPath) == m_pipelines.end()) {
                 m_pipelines[node.shaderPath] = std::make_unique<VulkanComputePipeline>(m_device, node.shaderPath, MAX_PUSH_CONSTANT_SIZE);
             }

@@ -119,6 +119,7 @@ namespace rhi::vk{
         shaderc::CompileOptions options;
         // デバッグのしやすさのために最適化レベルやデバッグ情報を設定可能
         options.SetOptimizationLevel(shaderc_optimization_level_performance);
+        options.SetGenerateDebugInfo();
 
         // 3. コンパイル実行
         shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(

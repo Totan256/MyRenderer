@@ -36,10 +36,11 @@ namespace rhi::vk {
         }
 
         PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;
-        ResourceHandle importResource(Resource* res) override;
-        ResourceHandle createImage(const ImageDesc& desc) override;
-        ResourceHandle createBuffer(const BufferDesc& desc) override;
+        ResourceHandle importResource(Resource* res, StringHash nameHash = 0) override;
+        ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = 0) override;
+        ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = 0) override;
         uint32_t getPhysicalIndex(ResourceHandle handle) override;
+        const ResourceRegistration& getRegistration(ResourceHandle handle) const { return m_resourceRegistry[handle];}
 
         void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType) override;
 

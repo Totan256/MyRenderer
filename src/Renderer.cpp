@@ -4,17 +4,10 @@
 #include "CommandList.hpp"
 #include "ImageExporter.hpp"
 #include "rhi/UploadManager.hpp" 
+#include "utils/StringHash.hpp"
 #include <iostream>
 #include <cstddef>
 #include <vector>
-
-struct TestPushConstants {
-    uint32_t outputBufferIndex;
-    uint32_t paletteIndex;
-    uint32_t staticUboIndex;
-    uint32_t dynamicUboIndex;
-    uint32_t dynamicUboOffset;
-};
 
 struct StaticUniformData {
     uint32_t resX;
@@ -74,60 +67,47 @@ void Renderer::render(float time) {
     // ★ 遅延アップロードの実行
     m_device.getUploadManager()->uploadBuffer(staticUbo.get(), &staticData, sizeof(StaticUniformData), rhi::UploadMode::Deferred);
 
-
+    
     // 4. RenderGraph の構築
     std::cout << "--- Building Render Graph ---" << std::endl;
     auto graph = m_device.createRenderGraph();
     
-    auto hOutput    = graph->importResource(outputBuffer.get());
-    auto hPalette   = graph->importResource(paletteBuffer.get());
-    auto hStaticUbo = graph->importResource(staticUbo.get());
+    auto hOutput    = graph->importResource(outputBuffer.get(), "outputBufferIndex"_hash);
+    auto hPalette   = graph->importResource(paletteBuffer.get(), "paletteIndex"_hash);
+    auto hStaticUbo = graph->importResource(staticUbo.get(), "staticUboIndex"_hash);
 
-    auto& bindGroup = graph->createBindGroup({
-        {offsetof(TestPushConstants, outputBufferIndex), rhi::ResourceState::StorageWrite},
-        {offsetof(TestPushConstants, paletteIndex), rhi::ResourceState::StorageRead},
-        {offsetof(TestPushConstants, staticUboIndex), rhi::ResourceState::ConstantBuffer}
-    });
-
-    auto& pass = graph->addPass("UniformTest", "shaders/uniform_test.comp")
-                      .bind(bindGroup);
-
+    // auto& bindGroup = graph->createBindGroup({
+    //     {offsetof(TestPushConstants, outputBufferIndex), rhi::ResourceState::StorageWrite},
+    //     {offsetof(TestPushConstants, paletteIndex), rhi::ResourceState::StorageRead},
+    //     {offsetof(TestPushConstants, staticUboIndex), rhi::ResourceState::ConstantBuffer}
+    // });
+    auto& pass = graph->addPass("UniformTest", "shaders/uniform_test.comp");
+                      //.bind(bindGroup);
     uint32_t halfW = m_width / 2;
     uint32_t halfH = m_height / 2;
-    uint32_t groupX = (halfW + 15) / 16;
-    uint32_t groupY = (halfH + 15) / 16;
-
+    
     // Dispatch 0
     DynamicUniformData dyn0 = {0, 0, 1.0f, 0};
-    pass.dispatch(groupX, groupY, 1)
-        .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
-        .updateResource(offsetof(TestPushConstants, paletteIndex), hPalette)
-        .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
-        .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn0);
+    pass.dispatch(halfW, halfH, 1)
+        .write(hOutput)
+        .read(hPalette)
+        .readUniform(hStaticUbo)
+        .setUniform("dynamicUboIndex"_hash, dyn0);
 
     // Dispatch 1
     DynamicUniformData dyn1 = {halfW, 0, 1.5f, 1};
-    pass.dispatch(groupX, groupY, 1)
-        .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
-        .updateResource(offsetof(TestPushConstants, paletteIndex), hPalette)
-        .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
-        .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn1);
+    pass.dispatch(halfW, halfH, 1)
+        .setUniform("dynamicUboIndex"_hash, dyn1);
 
     // Dispatch 2
     DynamicUniformData dyn2 = {0, halfH, 0.8f, 2};
-    pass.dispatch(groupX, groupY, 1)
-        .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
-        .updateResource(offsetof(TestPushConstants, paletteIndex), hPalette)
-        .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
-        .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn2);
+    pass.dispatch(halfW, halfH, 1)
+        .setUniform("dynamicUboIndex"_hash, dyn2);
 
     // Dispatch 3
     DynamicUniformData dyn3 = {halfW, halfH, 2.0f, 3};
-    pass.dispatch(groupX, groupY, 1)
-        .updateResource(offsetof(TestPushConstants, outputBufferIndex), hOutput)
-        .updateResource(offsetof(TestPushConstants, paletteIndex), hPalette)
-        .setStaticUniform(offsetof(TestPushConstants, staticUboIndex), hStaticUbo)
-        .setUniform(offsetof(TestPushConstants, dynamicUboIndex), dyn3);
+    pass.dispatch(halfW, halfH, 1)
+        .setUniform("dynamicUboIndex"_hash, dyn3);
 
     // グラフのコンパイル
     graph->compile();

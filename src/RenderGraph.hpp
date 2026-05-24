@@ -11,6 +11,7 @@
 #include "RHIForward.hpp"
 #include "rhi/Resource.hpp"
 #include "rhi/CommandList.hpp"
+#include "utils/StringHash.hpp"
 
 namespace rhi {
     using ResourceHandle = uint32_t;
@@ -26,12 +27,11 @@ namespace rhi {
     public:
         virtual ~DispatchObject() = default;
         virtual DispatchObject& updateConstantRaw(uint32_t offset, const void* data, size_t size) = 0;
-        virtual DispatchObject& updateResource(uint32_t offset, ResourceHandle handle) = 0;
-
-        virtual DispatchObject& setStaticUniform(uint32_t offset, ResourceHandle handle) = 0;
-        virtual DispatchObject& setUniformRaw(uint32_t offset, const void* data, size_t size) = 0;
-
         virtual DispatchObject& updateSize(uint32_t x, uint32_t y, uint32_t z) = 0;
+        virtual DispatchObject& read(ResourceHandle handle) = 0;
+        virtual DispatchObject& write(ResourceHandle handle) = 0;
+        virtual DispatchObject& readUniform(ResourceHandle handle) = 0;
+        virtual DispatchObject& setUniformRaw(StringHash nameHash, const void* data, size_t size) = 0;
 
         // テンプレートでのヘルパー
         template<typename T>
@@ -40,9 +40,9 @@ namespace rhi {
             return *this;
         }
         template<typename T>
-        DispatchObject& setUniform(uint32_t offset, const T& value) {
-            static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned for std140.");
-            return setUniformRaw(offset, &value, sizeof(T));
+        DispatchObject& setUniform(StringHash nameHash, const T& value) {
+            static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned");
+            return setUniformRaw(nameHash, &value, sizeof(T));
         }
     };
     
@@ -55,12 +55,15 @@ namespace rhi {
         virtual PassBuilder& bind(uint32_t offset, ResourceState state) = 0;
         // 計算実行
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
+        virtual DispatchObject& dispatchThreads(uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
         virtual PassBuilder& forceBatchBreak() = 0;
 
     protected:
     };
 
     struct ResourceRegistration {
+        StringHash nameHash = 0;
+
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
         bool isImage() const {
             if (isImported && physicalResource) {
@@ -75,7 +78,6 @@ namespace rhi {
         // 依存関係解析用
         std::vector<uint32_t> producers; // このリソースに書き込むパスのIndex
         std::vector<uint32_t> consumers; // このリソースを読み込むパスのIndex
-
     };
 
     struct ResourceLifetime {
@@ -104,9 +106,13 @@ namespace rhi {
 
             // struct UBOBinding { uint32_t index; uint32_t offset; };
             // std::map<uint32_t, UBOBinding> uboBindings;
-            uint32_t x, y, z;
+            uint32_t x = 1, y = 1, z = 1;
         };
-        std::vector<DispatchState> dispatchStates;
+        uint32_t localSizeX = 1;
+        uint32_t localSizeY = 1;
+        uint32_t localSizeZ = 1;
+        std::map<StringHash, uint32_t> pushConstantOffsets;
+        std::deque<DispatchState> dispatchStates;
     };
 
     // レンダーグラフ本体
@@ -115,11 +121,9 @@ namespace rhi {
         virtual ~RenderGraph() = default;
 
         // 外部の物理リソースを登録（スワップチェーンなど）
-        virtual ResourceHandle importResource(Resource* res) = 0;
-
-        // グラフ内でのみ使うリソースの予約
-        virtual ResourceHandle createImage(const ImageDesc& desc) = 0;
-        virtual ResourceHandle createBuffer(const BufferDesc& desc) = 0;
+        virtual ResourceHandle importResource(Resource* res, StringHash nameHash = 0) = 0;
+        virtual ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = 0) = 0;
+        virtual ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = 0) = 0;
         BindGroup& createBindGroup(const std::vector<ResourceRequirement>& bindings) {
             m_bindGroups.push_back(std::make_unique<BindGroup>(bindings));
             return *m_bindGroups.back();
