@@ -18,23 +18,22 @@ struct VertexAttributes {
     // glm::vec4 tangent;
 };
 
-struct SubMesh {
+struct CpuSubMesh {
     uint32_t indexBase;
     uint32_t indexCount;
     uint32_t materialIndex;
 };
 
-struct Model {
-    std::unique_ptr<rhi::Buffer> positionBuffer;
-    std::unique_ptr<rhi::Buffer> attributeBuffer;
-    std::unique_ptr<rhi::Buffer> indexBuffer;
-    
-    std::vector<SubMesh> subMeshes;
-    // ロードされたテクスチャのBindless Index
-    std::vector<uint32_t> albedoTextureIndices;
+// GPUに依存しない、純粋なCPU上のデータコンテナ
+struct CpuModelData {
+    std::vector<VertexPosition> positions;
+    std::vector<VertexAttributes> attributes;
+    std::vector<uint32_t> indices;
+    std::vector<CpuSubMesh> subMeshes;
 };
+
 
 class ModelImporter {
 public:
-    static std::unique_ptr<Model> loadFromFile(const std::string& filepath, rhi::Device& device);
+    static CpuModelData loadFromFile(const std::string& filepath);
 };

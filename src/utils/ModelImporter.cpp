@@ -5,7 +5,7 @@
 #include <iostream>
 #include <filesystem>
 
-std::unique_ptr<Model> ModelImporter::loadFromFile(const std::string& filepath, rhi::Device& device) {
+CpuModelData ModelImporter::loadFromFile(const std::string& filepath) {
     Assimp::Importer importer;
     // ポリゴンを三角形化し、UVを反転（Vulkan向け）
     const aiScene* scene = importer.ReadFile(filepath, 
@@ -15,7 +15,7 @@ std::unique_ptr<Model> ModelImporter::loadFromFile(const std::string& filepath, 
         throw std::runtime_error("Assimp Error: " + std::string(importer.GetErrorString()));
     }
 
-    auto model = std::make_unique<Model>();
+    CpuModelData model;
     std::vector<VertexPosition> positions;
     std::vector<VertexAttributes> attributes;
     std::vector<uint32_t> indices;
@@ -25,7 +25,7 @@ std::unique_ptr<Model> ModelImporter::loadFromFile(const std::string& filepath, 
     for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
         aiMesh* mesh = scene->mMeshes[i];
         
-        SubMesh subMesh{};
+        CpuSubMesh subMesh{};
         subMesh.indexBase = indices.size();
         subMesh.materialIndex = mesh->mMaterialIndex;
 
@@ -56,23 +56,10 @@ std::unique_ptr<Model> ModelImporter::loadFromFile(const std::string& filepath, 
         }
         
         subMesh.indexCount = indices.size() - subMesh.indexBase;
-        model->subMeshes.push_back(subMesh);
+        model.subMeshes.push_back(subMesh);
     }
-
-    // Pull型フェッチ(gl_VertexIndex用)のため StorageBuffer としてアップロード
-    auto* uploadManager = device.getUploadManager();
-
-    rhi::BufferDesc posDesc{ positions.size() * sizeof(VertexPosition), rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst, false };
-    model->positionBuffer = device.createBuffer(posDesc);
-    uploadManager->uploadBuffer(model->positionBuffer.get(), positions.data(), posDesc.size, rhi::UploadMode::Immediate);
-
-    rhi::BufferDesc attrDesc{ attributes.size() * sizeof(VertexAttributes), rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst, false };
-    model->attributeBuffer = device.createBuffer(attrDesc);
-    uploadManager->uploadBuffer(model->attributeBuffer.get(), attributes.data(), attrDesc.size, rhi::UploadMode::Immediate);
-
-    rhi::BufferDesc idxDesc{ indices.size() * sizeof(uint32_t), rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst, false };
-    model->indexBuffer = device.createBuffer(idxDesc);
-    uploadManager->uploadBuffer(model->indexBuffer.get(), indices.data(), idxDesc.size, rhi::UploadMode::Immediate);
-
+    model.positions = std::move(positions);
+    model.attributes = std::move(attributes);
+    model.indices = std::move(indices);
     return model;
 }

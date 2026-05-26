@@ -514,6 +514,11 @@ namespace rhi::vk {
     }
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
+        // UploadManagerから非同期アップロード完了待ちのセマフォを回収
+        auto asyncSems = m_device.getUploadManager()->consumeAsyncSemaphores();
+        std::vector<SemaphoreHandle> combinedWaitSems = waitSemaphores;
+        combinedWaitSems.insert(combinedWaitSems.end(), asyncSems.begin(), asyncSems.end());
+
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
             auto& batch = m_batches[batchIdx];
             batch.cmdList->reset();
@@ -605,19 +610,23 @@ namespace rhi::vk {
             std::vector<VkSemaphore> currentWaitSemaphores = batch.waitSemaphores;
             std::vector<VkPipelineStageFlags> currentWaitStages = batch.waitStages;
 
+            if (batchIdx == 0 && !combinedWaitSems.empty()) {
+                for (auto semHandle : combinedWaitSems) {
+                    currentWaitSemaphores.push_back(static_cast<VkSemaphore>(semHandle));
+                    currentWaitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); 
+                }
+            }
             if (batchIdx == 0 && !waitSemaphores.empty()) {
                 for (auto semHandle : waitSemaphores) {
                     currentWaitSemaphores.push_back(static_cast<VkSemaphore>(semHandle));
                     currentWaitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); 
                 }
             }
-            
             if (!batch.waitSemaphores.empty()) {
                 submitInfo.waitSemaphoreCount = (uint32_t)batch.waitSemaphores.size();
                 submitInfo.pWaitSemaphores = batch.waitSemaphores.data();
                 submitInfo.pWaitDstStageMask = batch.waitStages.data();
             }
-            
             if (!batch.signalSemaphores.empty()) {
                 submitInfo.signalSemaphoreCount = (uint32_t)batch.signalSemaphores.size();
                 submitInfo.pSignalSemaphores = batch.signalSemaphores.data();

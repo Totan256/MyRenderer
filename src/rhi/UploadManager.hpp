@@ -21,32 +21,22 @@ namespace rhi {
         uint32_t width, height, mipLevels;
     };
 
-    enum class UploadMode {
-        Deferred,    // RenderGraphのコンパイル時にCopyパスとして組み込む
-        Async,       // 即座にTransfer Queueに発行し、グラフが自動でセマフォ待機する
-        Immediate    // 即座にTransfer Queueに発行し、CPUで完了を待機する（ロード画面等）
-    };
-
     class UploadManager {
     public:
         virtual ~UploadManager() = default;
 
-        virtual void uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode = UploadMode::Deferred) = 0;
-        
-        // ※Deferredモードのみサポート (Immediate/Asyncでマップを使う場合は別途flush/unmapの設計が必要なため)
-        virtual void* mapForDeferredUpload(Buffer* dstBuffer, size_t size) = 0;
-        virtual std::unique_ptr<Image> uploadImageFromFile(
-            const std::string& filepath, 
-            std::optional<rhi::ImageDesc> overrideDesc = std::nullopt,
-            UploadMode mode = UploadMode::Deferred) = 0;
-        
-        // RenderGraphがコンパイル時に、使用されるバッファの非同期セマフォを回収するための関数
-        virtual std::vector<SemaphoreHandle> consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) = 0;
-        virtual std::vector<SemaphoreHandle> consumeImageSemaphores(const std::vector<Image*>& images) = 0;
+        virtual void enqueueBufferUpload(Buffer* dstBuffer, const void* data, size_t size, size_t dstOffset = 0) = 0;
+        virtual void enqueueImageUpload(Image* dstImage, const void* data, size_t size, uint32_t width, uint32_t height, uint32_t mipLevels) = 0;
+
+        // 非同期実行と待機
+        virtual SemaphoreHandle submitUploadsAsync() = 0;
+        virtual void waitUploads() = 0;
+
+        // RenderGraph実行時に未回収のセマフォを全て回収する
+        virtual std::vector<SemaphoreHandle> consumeAsyncSemaphores() = 0;
 
         virtual std::vector<UploadRequest> getAndClearPendingUploads() = 0;
         virtual std::vector<rhi::ImageUploadRequest> getAndClearPendingImageUploads() = 0;
         virtual void beginFrame(uint64_t currentFrameIndex) = 0;
-        virtual void flushImmediate() = 0;
     };
 }

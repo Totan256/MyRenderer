@@ -40,20 +40,21 @@ namespace rhi::vk {
         VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize);
         ~VulkanUploadManager() override;
 
-        void* mapForDeferredUpload(Buffer* dstBuffer, size_t size) override;
-        void uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode = UploadMode::Deferred) override;
-        
-        std::vector<SemaphoreHandle> consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) override;
-        std::vector<SemaphoreHandle> consumeImageSemaphores(const std::vector<Image*>& images) override;
+        void enqueueBufferUpload(Buffer* dstBuffer, const void* data, size_t size, size_t dstOffset = 0) override;
+        void enqueueImageUpload(Image* dstImage, const void* data, size_t size, uint32_t width, uint32_t height, uint32_t mipLevels) override;
+
+        // 非同期実行と待機
+        SemaphoreHandle submitUploadsAsync() override;
+        void waitUploads() override;
+
+        // RenderGraph実行時に未回収のセマフォを全て回収する
+        std::vector<SemaphoreHandle> consumeAsyncSemaphores() override;
+
+
         
         std::vector<UploadRequest> getAndClearPendingUploads() override;
         std::vector<rhi::ImageUploadRequest> getAndClearPendingImageUploads() override;
         void beginFrame(uint64_t currentFrameIndex) override;
-        std::unique_ptr<rhi::Image> uploadImageFromFile(
-            const std::string& filepath, 
-            std::optional<rhi::ImageDesc> overrideDesc = std::nullopt,
-            UploadMode mode = UploadMode::Deferred) override;
-        void flushImmediate() override;
     private:
         VulkanDevice& m_device;
         uint32_t m_framesInFlight;
@@ -61,11 +62,9 @@ namespace rhi::vk {
 
         AsyncUploadState m_asyncState; // ImmediateとAsyncで共用
         std::vector<PerFrameUploadState> m_frameStates;
-        std::unordered_map<Buffer*, VkSemaphore> m_pendingAsyncSemaphores; // バッファとセマフォの紐付け
-        std::unordered_map<Image*, VkSemaphore> m_pendingImageSemaphores;
+        std::vector<VkSemaphore> m_pendingAsyncSemaphores;
 
         StagingAllocation allocateStagingSpace(UploadState& state, size_t size, size_t alignment = 4);
-        void ensureAsyncReady(); 
-        void flushAsync(Buffer* dstBuffer, UploadMode mode);
+        void ensureAsyncReady();
     };
 }

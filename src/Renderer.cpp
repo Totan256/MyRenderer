@@ -5,6 +5,7 @@
 #include "ImageExporter.hpp"
 #include "rhi/UploadManager.hpp" 
 #include "utils/StringHash.hpp"
+#include "rhi/ModelBuilder.hpp"
 #include <iostream>
 #include <cstddef>
 #include <vector>
@@ -54,7 +55,7 @@ void Renderer::render(float time) {
     });
     
     // ★ 遅延アップロードの実行 (グラフコンパイル時に自動的に Transfer Queue に乗る)
-    m_device.getUploadManager()->uploadBuffer(paletteBuffer.get(), palette.data(), palette.size() * sizeof(ColorVec4), rhi::UploadMode::Deferred);
+    m_device.getUploadManager()->enqueueBufferUpload(paletteBuffer.get(), palette.data(), palette.size() * sizeof(ColorVec4));
 
     // 3. 静的 Uniform Buffer
     StaticUniformData staticData = { m_width, m_height, time, 0.0f };
@@ -65,8 +66,10 @@ void Renderer::render(float time) {
     });
     
     // ★ 遅延アップロードの実行
-    m_device.getUploadManager()->uploadBuffer(staticUbo.get(), &staticData, sizeof(StaticUniformData), rhi::UploadMode::Deferred);
+    m_device.getUploadManager()->enqueueBufferUpload(staticUbo.get(), &staticData, sizeof(StaticUniformData));
 
+    m_device.getUploadManager()->submitUploadsAsync(); // アップロード要求を即座に送信（非同期）
+    m_device.getUploadManager()->waitUploads(); // アップロード完了を待機
     
     // 4. RenderGraph の構築
     std::cout << "--- Building Render Graph ---" << std::endl;
