@@ -163,6 +163,21 @@ namespace rhi::vk{
         return std::nullopt;
     }
 
+    std::optional<uint32_t> VulkanDevice::findGraphicsQueueFamilyIndex(VkPhysicalDevice device) {
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        for (uint32_t i = 0; i < queueFamilyCount; ++i) {
+            // Graphics QueueはVulkanの仕様上ComputeもTransferもサポートする
+            if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
     void VulkanDevice::pickPhysicalDevice(){
         // 5. 物理デバイス（GPU）の列挙
         uint32_t deviceCount = 0;
@@ -184,10 +199,14 @@ namespace rhi::vk{
             std::cout << "  - Device: " << properties.deviceName << std::endl;
 
             std::optional<uint32_t> computeIndex = findComputeQueueFamilyIndex(device);
-            
+            std::optional<uint32_t> graphicsIndex = findGraphicsQueueFamilyIndex(device);
+
             if (computeIndex.has_value()) {
                 m_physicalDevice = device;
                 m_computeQueueFamilyIndex = computeIndex.value();
+                if (graphicsIndex.has_value()) {
+                    m_graphicsQueueFamilyIndex = graphicsIndex.value();
+                }
                 std::cout << "  -> Selected as Physical Device. Compute Queue Family Index: " 
                         << m_computeQueueFamilyIndex << std::endl;
                 return;
@@ -226,6 +245,7 @@ namespace rhi::vk{
         indexingFeatures.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
         indexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
         indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+        indexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 
         // 8. 論理デバイス作成情報の定義
         VkDeviceCreateInfo createInfo{};
@@ -273,8 +293,16 @@ namespace rhi::vk{
 
 
     VulkanDevice::~VulkanDevice(){
+        enqueueDeletion([&samplers = m_samplers, device = m_device]() {
+            for (auto& [hash, sampler] : samplers) {
+                if (sampler != VK_NULL_HANDLE) {
+                    vkDestroySampler(device, sampler, nullptr);
+                }
+            }
+        });
         // 1. 全てのGPU処理が終わるまで安全に待機
         vkDeviceWaitIdle(m_device);
+        
         // 2. マネージャ系の破棄（内部で保持しているCommandList等のフェンスもここで安全に破棄される）
         m_constantBufferManager.reset();
         m_uploadManager.reset();
@@ -368,14 +396,13 @@ namespace rhi::vk{
 
         VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT };
         std::vector<VkDescriptorBindingFlags> allFlags = {
-            flags,
-            flags,
-            flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
+            flags, flags, flags, flags, // Binding 0~3
+            flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT // Binding 4 (Sampler)
         };
-        bindingFlags.bindingCount = 3;
+        bindingFlags.bindingCount = 5;
         bindingFlags.pBindingFlags = allFlags.data();
 
-        VkDescriptorSetLayoutBinding bindings[3] = {};
+        VkDescriptorSetLayoutBinding bindings[5] = {};
         // Binding 0: Storage Buffers
         bindings[0].binding = 0;
         bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -391,11 +418,21 @@ namespace rhi::vk{
         bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         bindings[2].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[2].stageFlags = VK_SHADER_STAGE_ALL;
+        // Binding 3: Sampled Images
+        bindings[3].binding = 3;
+        bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        bindings[3].descriptorCount = MAX_BINDLESS_RESOURCES;
+        bindings[3].stageFlags = VK_SHADER_STAGE_ALL;
+        // Binding 4: Samplers
+        bindings[4].binding = 4;
+        bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        bindings[4].descriptorCount = 32; // サンプラーは少数で十分
+        bindings[4].stageFlags = VK_SHADER_STAGE_ALL;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.pNext = &bindingFlags;
-        layoutInfo.bindingCount = 3;
+        layoutInfo.bindingCount = 5;
         layoutInfo.pBindings = bindings;
         layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 
@@ -405,7 +442,9 @@ namespace rhi::vk{
         std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_BINDLESS_RESOURCES },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_BINDLESS_RESOURCES},
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_BINDLESS_RESOURCES }
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_BINDLESS_RESOURCES },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_BINDLESS_RESOURCES },
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 32 }
         };
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -417,11 +456,11 @@ namespace rhi::vk{
 
         // ディスクリプタセットの割り当て
         // 可変長配列（Variable Descriptor Count）を使用する場合 pNext で最大数を指定する必要があり
-        uint32_t maxBindingCounts[3] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES};
+        uint32_t maxBindingCounts[5] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, 32 };
         VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
         variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
         variableCountInfo.descriptorSetCount = 1;
-        variableCountInfo.pDescriptorCounts = &maxBindingCounts[2]; // 最後のバインディング(UBO)の最大数
+        variableCountInfo.pDescriptorCounts = &maxBindingCounts[4]; // 最後のバインディング(UBO)の最大数
 
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -447,12 +486,67 @@ namespace rhi::vk{
         return index;
     }
 
+    uint32_t VulkanDevice::registerSampledImage(VkImageView view) {
+        uint32_t index = allocateIndex(); // 既存のインデックスアロケータを利用
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // サンプリング用レイアウト
+        imageInfo.imageView = view;
+        imageInfo.sampler = VK_NULL_HANDLE; // アプローチBのためサンプラーは結合しない
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_bindlessDescriptorSet;
+        write.dstBinding = 3; // Binding 3: Sampled Images
+        write.dstArrayElement = index;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        write.descriptorCount = 1;
+        write.pImageInfo = &imageInfo;
+
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        return index;
+    }
+
+    uint32_t VulkanDevice::registerSampler(VkSampler sampler) {
+        uint32_t index = allocateIndex();
+
+        VkDescriptorImageInfo samplerInfo{};
+        samplerInfo.sampler = sampler;
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_bindlessDescriptorSet;
+        write.dstBinding = 4; // Binding 4: Samplers
+        write.dstArrayElement = index;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &samplerInfo;
+
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        return index;
+    }
+
+    uint32_t VulkanDevice::getStaticSampler(StringHash nameHash) const {
+        auto it = m_staticSamplers.find(nameHash);
+        if (it == m_staticSamplers.end()) {
+            // 見つからない場合はデフォルトとして LinearRepeat(最初に登録したもの) のインデックスを返す
+            return m_staticSamplers.at("LinearRepeat"_hash);
+        }
+        return it->second;
+    }
+
     VkQueue VulkanDevice::getQueue(QueueType type) const {
         // Todo 将来GraphicsやCopyも対応する場合はtypeに応じて適切なキューを返すようにする
+        if (type == QueueType::Graphics) {
+            return m_graphicsQueue;
+        }
         return m_computeQueue;
     }
     
     uint32_t VulkanDevice::getQueueFamilyIndex(QueueType type) const {
+        if (type == QueueType::Graphics) {
+            return m_graphicsQueueFamilyIndex;
+        }
         return m_computeQueueFamilyIndex;
     }
 
@@ -462,6 +556,28 @@ namespace rhi::vk{
         VkSemaphore sem;
         VK_CHECK(vkCreateSemaphore(m_device, &info, nullptr, &sem));
         return sem;
+    }
+
+    void VulkanDevice::createStaticSamplers() {
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+        samplerInfo.mipLodBias = 0.0f;
+        // 必要に応じて異方性フィルタ(Anisotropy)などを設定
+
+        VkSampler linearRepeat;
+        vkCreateSampler(m_device, &samplerInfo, nullptr, &linearRepeat);
+        m_staticSamplers["LinearRepeat"_hash] = registerSampler(linearRepeat);
+        m_samplers["LinearRepeat"_hash] = linearRepeat;
+        
+        // TODO: 同様に LinearClamp, NearestClamp などを作成
     }
 
     void VulkanDevice::destroySemaphore(VkSemaphore semaphore) {

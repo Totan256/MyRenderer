@@ -48,6 +48,7 @@ namespace rhi {
 
     enum class Format {
         R8G8B8A8_Unorm,
+        R16G16B16A16_Unorm,
         R32G32B32A32_Sfloat,
         // ... 
     };
@@ -84,7 +85,8 @@ namespace rhi {
     enum class PassType {
         Compute,
         Graphics,
-        Copy
+        Copy,
+        GenerateMipmaps
     };
     
     enum class ShaderStage : uint64_t {

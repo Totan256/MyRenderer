@@ -113,6 +113,8 @@ namespace rhi {
         uint32_t localSizeZ = 1;
         std::map<StringHash, uint32_t> pushConstantOffsets;
         std::deque<DispatchState> dispatchStates;
+
+        std::function<void(rhi::CommandList&)> callback; // Callback Pass用
     };
 
     // レンダーグラフ本体

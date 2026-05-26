@@ -215,24 +215,63 @@ namespace rhi::vk {
         clearBatchSemaphores();
 
         // 0. アップロード要求の取得とパスの自動追加
-        auto uploads = m_device.getUploadManager()->getAndClearPendingUploads();
+        auto uploadManager = m_device.getUploadManager();
+        auto uploads = uploadManager->getAndClearPendingUploads();
+        auto imgUploads = uploadManager->getAndClearPendingImageUploads();
+        if (!imgUploads.empty()) {
+            m_logicalNodes.emplace_front();
+            auto& mipNode = m_logicalNodes.front();
+            mipNode.name = "AutoMipmapGen";
+            mipNode.type = PassType::GenerateMipmaps; // 専用のシステムパスタイプ
+            mipNode.queueType = rhi::QueueType::Compute; // 今後コンピュート化する際もこのままでOK
+            
+            for (const auto& up : imgUploads) {
+                ResourceHandle hDst = importResource(up.dstImage);
+                mipNode.resourceHandles.push_back(hDst);
+                // レンダーグラフに対して、この段階で画像への書き込み要件が発生することを通知
+                mipNode.requirements.push_back({0, rhi::ResourceState::StorageWrite, rhi::ShaderStage::Compute});
+            }
+        }
+        if (!imgUploads.empty()) {
+            m_logicalNodes.emplace_front();
+            auto& copyImgNode = m_logicalNodes.front();
+            copyImgNode.name = "AutoImageUpload";
+            copyImgNode.type = PassType::Copy;
+            copyImgNode.queueType = rhi::QueueType::Transfer;
+            
+            for (const auto& up : imgUploads) {
+                ResourceHandle hStaging = importResource(up.stagingBuffer);
+                ResourceHandle hDst = importResource(up.dstImage);
+                
+                copyImgNode.resourceHandles.push_back(hStaging);
+                copyImgNode.requirements.push_back({0, rhi::ResourceState::TransferSrc, rhi::ShaderStage::Transfer});
+                copyImgNode.resourceHandles.push_back(hDst);
+                copyImgNode.requirements.push_back({1, rhi::ResourceState::TransferDst, rhi::ShaderStage::Transfer});
+                
+                copyImgNode.dispatchStates.push_back({});
+                auto& ds = copyImgNode.dispatchStates.back();
+                ds.resourceOffsets[0] = hStaging;
+                ds.resourceOffsets[1] = hDst;
+                ds.x = up.width;           // execute側へ引き渡すメタデータ
+                ds.y = up.height;
+                ds.z = up.stagingOffset;
+                ds.id = up.mipLevels;      // Mipレベル数を格納
+            }
+        }
         if (!uploads.empty()) {
             m_logicalNodes.emplace_front(); // Transferパスを先頭に挿入
             auto& node = m_logicalNodes.front();
             node.name = "AutoUpload";
             node.type = PassType::Copy;
             node.queueType = rhi::QueueType::Transfer;
-            
             for (size_t i = 0; i < uploads.size(); ++i) {
                 const auto& up = uploads[i];
                 ResourceHandle hStaging = importResource(up.stagingBuffer);
                 ResourceHandle hDst = importResource(up.dstBuffer);
-                
                 node.resourceHandles.push_back(hStaging);
                 node.requirements.push_back({0, rhi::ResourceState::TransferSrc, rhi::ShaderStage::Transfer});
                 node.resourceHandles.push_back(hDst);
                 node.requirements.push_back({1, rhi::ResourceState::StorageWrite, rhi::ShaderStage::Transfer}); // Write依存を作るためStorageWriteとして扱う
-                
                 node.dispatchStates.push_back({});
                 auto& ds = node.dispatchStates.back();
                 ds.resourceOffsets[0] = hStaging;
@@ -299,28 +338,130 @@ namespace rhi::vk {
         m_resourceAllocator.allocate(m_resourceRegistry, m_resourceLifetimes);
         std::cout << "Physical resources allocated." << std::endl;//debug
         // 3. バリアとレイアウト遷移の生成
-        std::map<rhi::ResourceHandle, VulkanResourceState> currentStates;
+        struct ResourceTrackingState {
+            uint32_t lastPassIdx;
+            VulkanResourceState state;
+            QueueType queueType;
+        };
+        std::map<rhi::ResourceHandle, ResourceTrackingState> currentStates;
         for (uint32_t passIdx : sortedIndices) {
             auto& logicalNode = m_logicalNodes[passIdx];
             auto& physiaclNode = m_physicalNodes[passIdx];
             physiaclNode.imageBarriers.clear();
             physiaclNode.bufferBarriers.clear();
-            
+            uint32_t currentQueueFamily = m_device.getQueueFamilyIndex(logicalNode.queueType);
             for (size_t i = 0; i < logicalNode.resourceHandles.size(); ++i) {
                 rhi::ResourceHandle h = logicalNode.resourceHandles[i];
                 const auto& req = logicalNode.requirements[i];
                 VulkanResourceState next = MapResourceState(req.state, req.stage);
-                VulkanResourceState prev = currentStates.count(h) ? currentStates[h] : 
-                    VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
-                
-                if (prev.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
+                if (currentStates.count(h)) {
+                    auto& prevTrack = currentStates[h];
+                    uint32_t prevQueueFamily = m_device.getQueueFamilyIndex(prevTrack.queueType);
+                    if (prevQueueFamily != currentQueueFamily) {
+                        // キューファミリーが異なるため、所有権移行（Ownership Transfer）を生成
+                        if (m_resourceRegistry[h].isImage()) {
+                            VkImage img = m_resourceAllocator.getPhysicalImage(h)->getImage();
+                            // 移行元キュー（前回のパス）に Release バリアを挿入
+                            VkImageMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                            releaseBarrier.srcStageMask        = prevTrack.state.stageMask;
+                            releaseBarrier.srcAccessMask       = prevTrack.state.accessMask;
+                            releaseBarrier.dstStageMask        = VK_PIPELINE_STAGE_2_NONE;
+                            releaseBarrier.dstAccessMask       = VK_ACCESS_2_NONE;
+                            releaseBarrier.oldLayout           = prevTrack.state.layout;
+                            releaseBarrier.newLayout           = prevTrack.state.layout; // ★同じレイアウトを維持
+                            releaseBarrier.srcQueueFamilyIndex = prevQueueFamily;
+                            releaseBarrier.dstQueueFamilyIndex = currentQueueFamily;
+                            releaseBarrier.image               = img;
+                            releaseBarrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                            m_physicalNodes[prevTrack.lastPassIdx].imageBarriers.push_back(releaseBarrier);
+                            // 移行先キュー（現在のパス）に Acquire バリアを挿入
+                            VkImageMemoryBarrier2 acquireBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                            acquireBarrier.srcStageMask        = VK_PIPELINE_STAGE_2_NONE;
+                            acquireBarrier.srcAccessMask       = VK_ACCESS_2_NONE;
+                            acquireBarrier.dstStageMask        = next.stageMask;
+                            acquireBarrier.dstAccessMask       = next.accessMask;
+                            acquireBarrier.oldLayout           = prevTrack.state.layout;
+                            acquireBarrier.newLayout           = prevTrack.state.layout; // ★同じレイアウトを維持
+                            acquireBarrier.srcQueueFamilyIndex = prevQueueFamily;
+                            acquireBarrier.dstQueueFamilyIndex = currentQueueFamily;
+                            acquireBarrier.image               = img;
+                            acquireBarrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                            physiaclNode.imageBarriers.push_back(acquireBarrier);
+                            // Acquire 後にレイアウト遷移が必要な場合、現在のキューで追加のバリアを発行
+                            if (prevTrack.state.layout != next.layout) {
+                                VkImageMemoryBarrier2 layoutBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                                layoutBarrier.srcStageMask  = next.stageMask; 
+                                layoutBarrier.srcAccessMask = next.accessMask;
+                                layoutBarrier.dstStageMask  = next.stageMask;
+                                layoutBarrier.dstAccessMask = next.accessMask;
+                                layoutBarrier.oldLayout     = prevTrack.state.layout;
+                                layoutBarrier.newLayout     = next.layout;
+                                layoutBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                layoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                layoutBarrier.image         = img;
+                                layoutBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                                physiaclNode.imageBarriers.push_back(layoutBarrier);
+                            }
+                        } else {
+                            VkBuffer buf = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
+                            
+                            // Buffer の Release バリア
+                            VkBufferMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                            releaseBarrier.srcStageMask        = prevTrack.state.stageMask;
+                            releaseBarrier.srcAccessMask       = prevTrack.state.accessMask;
+                            releaseBarrier.dstStageMask        = VK_PIPELINE_STAGE_2_NONE;
+                            releaseBarrier.dstAccessMask       = VK_ACCESS_2_NONE;
+                            releaseBarrier.srcQueueFamilyIndex = prevQueueFamily;
+                            releaseBarrier.dstQueueFamilyIndex = currentQueueFamily;
+                            releaseBarrier.buffer              = buf;
+                            releaseBarrier.offset              = 0;
+                            releaseBarrier.size                = VK_WHOLE_SIZE;
+                            m_physicalNodes[prevTrack.lastPassIdx].bufferBarriers.push_back(releaseBarrier);
+
+                            // Buffer の Acquire バリア
+                            VkBufferMemoryBarrier2 acquireBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                            acquireBarrier.srcStageMask        = VK_PIPELINE_STAGE_2_NONE;
+                            acquireBarrier.srcAccessMask       = VK_ACCESS_2_NONE;
+                            acquireBarrier.dstStageMask        = next.stageMask;
+                            acquireBarrier.dstAccessMask       = next.accessMask;
+                            acquireBarrier.srcQueueFamilyIndex = prevQueueFamily;
+                            acquireBarrier.dstQueueFamilyIndex = currentQueueFamily;
+                            acquireBarrier.buffer              = buf;
+                            acquireBarrier.offset              = 0;
+                            acquireBarrier.size                = VK_WHOLE_SIZE;
+                            physiaclNode.bufferBarriers.push_back(acquireBarrier);
+                        }
+                    } else {
+                        // 同一キュー内での通常のパイプラインバリアおよびレイアウト遷移
+                        if (prevTrack.state.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
+                            if (m_resourceRegistry[h].isImage()) {
+                                VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                                imgBarrier.srcStageMask  = prevTrack.state.stageMask; imgBarrier.srcAccessMask = prevTrack.state.accessMask;
+                                imgBarrier.dstStageMask  = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
+                                imgBarrier.oldLayout     = prevTrack.state.layout;    imgBarrier.newLayout     = next.layout;
+                                imgBarrier.image         = m_resourceAllocator.getPhysicalImage(h)->getImage();
+                                imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                                physiaclNode.imageBarriers.push_back(imgBarrier);
+                            } else {
+                                VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                                bufBarrier.srcStageMask  = prevTrack.state.stageMask; bufBarrier.srcAccessMask = prevTrack.state.accessMask;
+                                bufBarrier.dstStageMask  = next.stageMask; bufBarrier.dstAccessMask = next.accessMask;
+                                bufBarrier.buffer        = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
+                                bufBarrier.offset        = 0;              bufBarrier.size          = VK_WHOLE_SIZE;
+                                physiaclNode.bufferBarriers.push_back(bufBarrier);
+                            }
+                        }
+                    }
+                } else {
+                    // 初回アクセス（Undefined からの遷移）
+                    VulkanResourceState prev = VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
                     if (m_resourceRegistry[h].isImage()) {
                         VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                         imgBarrier.srcStageMask  = prev.stageMask; imgBarrier.srcAccessMask = prev.accessMask;
                         imgBarrier.dstStageMask  = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                         imgBarrier.oldLayout     = prev.layout;    imgBarrier.newLayout     = next.layout;
                         imgBarrier.image         = m_resourceAllocator.getPhysicalImage(h)->getImage();
-                        imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                        imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
                         physiaclNode.imageBarriers.push_back(imgBarrier);
                     } else {
                         VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
@@ -331,7 +472,8 @@ namespace rhi::vk {
                         physiaclNode.bufferBarriers.push_back(bufBarrier);
                     }
                 }
-                currentStates[h] = next;
+                // リソース追跡状態の更新
+                currentStates[h] = ResourceTrackingState{ passIdx, next, logicalNode.queueType };
             }
         }
 
@@ -395,8 +537,21 @@ namespace rhi::vk {
                 if (logicalNode.type == PassType::Copy) {
                     for(auto& ds : logicalNode.dispatchStates) {
                         rhi::Buffer* physSrc = m_resourceAllocator.getPhysicalBuffer(ds.resourceOffsets[0]);
-                        rhi::Buffer* physDst = m_resourceAllocator.getPhysicalBuffer(ds.resourceOffsets[1]);
-                        batch.cmdList->copyBuffer(physSrc, physDst, ds.x, ds.y, 0);
+                        rhi::ResourceHandle hDst = ds.resourceOffsets[1];
+                        
+                        if (m_resourceRegistry[hDst].isImage()) {
+                            VulkanImage* physDstImg = m_resourceAllocator.getPhysicalImage(hDst);
+                            VulkanBuffer* physSrcBuf = static_cast<VulkanBuffer*>(physSrc);
+                            VkBufferImageCopy region{};
+                            region.bufferOffset = ds.z; // stagingOffset
+                            region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                            region.imageExtent = { ds.x, ds.y, 1 };
+                            vkCmdCopyBufferToImage(vkCmdBuf, physSrcBuf->getNativeBuffer(), physDstImg->getImage(),
+                                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                        } else {
+                            rhi::Buffer* physDst = m_resourceAllocator.getPhysicalBuffer(hDst);
+                            batch.cmdList->copyBuffer(physSrc, physDst, ds.x, ds.y, 0);
+                        }
                     }
                 } 
                 else if (logicalNode.type == PassType::Compute) {
@@ -430,6 +585,13 @@ namespace rhi::vk {
                             static_cast<VulkanCommandList*>(batch.cmdList.get())->setPushData(0, finalPushSize, finalPushData.data());
                         }
                         batch.cmdList->dispatch(state.x, state.y, state.z);
+                    }
+                }else if (logicalNode.type == PassType::GenerateMipmaps) {
+                    for (rhi::ResourceHandle hImg : logicalNode.resourceHandles) {
+                        VulkanImage* physImage = m_resourceAllocator.getPhysicalImage(hImg);
+                        if (physImage) {// todo computeシェーダでのミップマップ生成
+                            physImage->recordMipmapGenerationCmds(vkCmdBuf);
+                        }
                     }
                 }
             }

@@ -32,6 +32,7 @@ namespace rhi::vk {
 
     struct PerFrameUploadState : public UploadState {
         std::vector<UploadRequest> pendingUploads;
+        std::vector<rhi::ImageUploadRequest> pendingImageUploads;
     };
 
     class VulkanUploadManager : public UploadManager {
@@ -43,10 +44,16 @@ namespace rhi::vk {
         void uploadBuffer(Buffer* dstBuffer, const void* data, size_t size, UploadMode mode = UploadMode::Deferred) override;
         
         std::vector<SemaphoreHandle> consumeAsyncSemaphores(const std::vector<Buffer*>& buffers) override;
+        std::vector<SemaphoreHandle> consumeImageSemaphores(const std::vector<Image*>& images) override;
         
         std::vector<UploadRequest> getAndClearPendingUploads() override;
+        std::vector<rhi::ImageUploadRequest> getAndClearPendingImageUploads() override;
         void beginFrame(uint64_t currentFrameIndex) override;
-
+        std::unique_ptr<rhi::Image> uploadImageFromFile(
+            const std::string& filepath, 
+            std::optional<rhi::ImageDesc> overrideDesc = std::nullopt,
+            UploadMode mode = UploadMode::Deferred) override;
+        void flushImmediate() override;
     private:
         VulkanDevice& m_device;
         uint32_t m_framesInFlight;
@@ -55,6 +62,7 @@ namespace rhi::vk {
         AsyncUploadState m_asyncState; // ImmediateとAsyncで共用
         std::vector<PerFrameUploadState> m_frameStates;
         std::unordered_map<Buffer*, VkSemaphore> m_pendingAsyncSemaphores; // バッファとセマフォの紐付け
+        std::unordered_map<Image*, VkSemaphore> m_pendingImageSemaphores;
 
         StagingAllocation allocateStagingSpace(UploadState& state, size_t size, size_t alignment = 4);
         void ensureAsyncReady(); 

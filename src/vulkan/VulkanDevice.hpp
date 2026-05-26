@@ -78,8 +78,10 @@ namespace rhi::vk{
         uint32_t registerBuffer(VkBuffer buffer, VkDeviceSize size);
         uint32_t registerImage(VkImageView view);
         uint32_t registerUniformBuffer(VkBuffer buffer, VkDeviceSize size);
+        uint32_t registerSampledImage(VkImageView view);
+        uint32_t registerSampler(VkSampler sampler);
         void unregisterIndex(uint32_t index);
-
+        uint32_t getStaticSampler(StringHash nameHash) const;
         rhi::UploadManager* getUploadManager() override;
 
     private:
@@ -94,6 +96,8 @@ namespace rhi::vk{
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;
         uint32_t m_computeQueueFamilyIndex = 0;
+        VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+        uint32_t m_graphicsQueueFamilyIndex = 0;
         VmaAllocator m_allocator = VK_NULL_HANDLE;
         uint32_t m_minUniformBufferOffsetAlignment = 256;
         std::unique_ptr<ConstantBufferManager> m_constantBufferManager;
@@ -107,6 +111,12 @@ namespace rhi::vk{
         std::mutex m_indexMutex;            // スレッド安全のため
 
         const uint32_t MAX_BINDLESS_RESOURCES = 100000;
+
+        std::map<StringHash, uint32_t> m_staticSamplers;
+        std::map<StringHash, VkSampler> m_samplers; 
+
+        std::optional<uint32_t> findGraphicsQueueFamilyIndex(VkPhysicalDevice device);
+        void createStaticSamplers();
 
         // Frame in Flight数 (初期化時に決定)
         uint32_t m_framesInFlight = MAX_FRAMES_IN_FLIGHT;

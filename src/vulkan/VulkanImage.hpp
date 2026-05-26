@@ -17,6 +17,7 @@ namespace rhi::vk{
         VkImage getImage() const {return m_image;}
         VkImageView getView() const {return m_view;}
         uint32_t getBindlessIndex() const override { return m_bindlessIndex; }
+        uint32_t getBindlessSampledIndex() const { return m_bindlessSampledIndex; }
 
         rhi::ResourceState getCurrentState() const override { return m_state; }
         rhi::ShaderStage   getCurrentStage() const override { return m_stage; }
@@ -27,6 +28,9 @@ namespace rhi::vk{
         }
         bool isImage() const override { return true; }
         ImageDesc getDesc(){ return m_desc; }
+        void recordMipmapGenerationCmds(VkCommandBuffer cmd);
+        void registerAsSampledImage();
+        VkImageView getMipView(uint32_t mipLevel);
         
     private:
         VulkanDevice& m_device;
@@ -40,6 +44,8 @@ namespace rhi::vk{
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;
 
         uint32_t m_bindlessIndex = 0;
+        uint32_t m_bindlessSampledIndex = 0;
+        std::map<uint32_t, VkImageView> m_mipViews;
     };
 
 }

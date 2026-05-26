@@ -4,6 +4,7 @@
 #include "Renderer.hpp"
 
 int main() {
+    std::cout << "Initializing renderer..." << std::endl;
     try {
         std::unique_ptr<rhi::Device> device = rhi::createDevice(rhi::GraphicsAPI::Vulkan);
 

@@ -2,6 +2,10 @@
 #include <cstring>
 #include <iostream>
 #include <algorithm>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+#include "vulkan/VulkanSync.hpp"
+
 
 namespace rhi::vk {
     VulkanUploadManager::VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize)
@@ -137,6 +141,21 @@ namespace rhi::vk {
         return sems;
     }
 
+    std::vector<SemaphoreHandle> VulkanUploadManager::consumeImageSemaphores(const std::vector<Image*>& images) {
+        std::vector<SemaphoreHandle> sems;
+        for (auto img : images) {
+            auto it = m_pendingImageSemaphores.find(img);
+            if (it != m_pendingImageSemaphores.end()) {
+                sems.push_back(it->second);
+                m_pendingImageSemaphores.erase(it); // 回収したら消す
+            }
+        }
+        // 重複セマフォの除去
+        std::sort(sems.begin(), sems.end());
+        sems.erase(std::unique(sems.begin(), sems.end()), sems.end());
+        return sems;
+    }
+
     void VulkanUploadManager::beginFrame(uint64_t currentFrameIndex) {
         m_currentFrameIndex = currentFrameIndex % m_framesInFlight;
         auto& state = m_frameStates[m_currentFrameIndex];
@@ -150,5 +169,131 @@ namespace rhi::vk {
         auto res = std::move(state.pendingUploads);
         state.pendingUploads.clear();
         return res;
+    }
+
+    std::unique_ptr<rhi::Image> VulkanUploadManager::uploadImageFromFile(
+        const std::string& filepath, std::optional<rhi::ImageDesc> overrideDesc, UploadMode mode) {
+        
+        // 1. 画像ファイルの読み込み (stb_image)
+        int texWidth, texHeight, texChannels;
+        void* pixels = nullptr;
+        rhi::Format autoFormat;
+        size_t bytesPerPixel = 0;
+        if (!pixels) {
+            throw std::runtime_error("Failed to load image: " + filepath);
+        }
+        if (stbi_is_hdr(filepath.c_str())) {
+            pixels = stbi_loadf(filepath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+            autoFormat = rhi::Format::R32G32B32A32_Sfloat;
+            bytesPerPixel = 4 * sizeof(float);
+        } else if (stbi_is_16_bit(filepath.c_str())) {
+            pixels = stbi_load_16(filepath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+            autoFormat = rhi::Format::R16G16B16A16_Unorm;
+            bytesPerPixel = 4 * sizeof(uint16_t);
+        } else {
+            pixels = stbi_load(filepath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+            autoFormat = rhi::Format::R8G8B8A8_Unorm;
+            bytesPerPixel = 4 * sizeof(stbi_uc);
+        }
+        if (!pixels) {
+            throw std::runtime_error("Failed to load image: " + filepath);
+        }
+
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+        // ミップレベルの計算: floor(log2(max(width, height))) + 1
+        uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+
+        // 2. ImageDescの確定とVulkanImageの作成
+        rhi::ImageDesc desc = overrideDesc.value_or(rhi::ImageDesc{
+            (uint32_t)texWidth, (uint32_t)texHeight, 1,
+            mipLevels, 1,
+            autoFormat,
+            rhi::ImageUsageFlags::TransferSrc | rhi::ImageUsageFlags::TransferDst | rhi::ImageUsageFlags::Sampled
+        });
+
+        // 物理イメージの作成
+        auto vkUsage = mapImageUsage(desc.usageFlags);
+        auto image = std::make_unique<VulkanImage>(m_device, desc, vkUsage);
+
+        if (mode == rhi::UploadMode::Immediate){
+            ensureAsyncReady();
+            StagingAllocation alloc = allocateStagingSpace(m_asyncState, imageSize);
+            std::memcpy(alloc.mappedPtr, pixels, imageSize);
+            stbi_image_free(pixels); // メモリ解放
+            VkCommandBuffer cmd = m_asyncState.cmdList->getCommandBuffer();
+            // 4. Mip 0 を Copy 可能なレイアウト (TRANSFER_DST_OPTIMAL) へ遷移
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = image->getImage();
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.baseMipLevel = 0;
+            barrier.subresourceRange.levelCount = mipLevels;
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount = 1;
+            barrier.srcAccessMask = 0;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            vkCmdPipelineBarrier(
+                cmd, 
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0, 0, nullptr, 0, nullptr, 1, &barrier
+            );
+            // 5. Buffer to Image Copy (Mip 0 に対するデータ転送)
+            VkBufferImageCopy region{};
+            region.bufferOffset = alloc.offset;
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.mipLevel = 0; // Mip 0のみ
+            region.imageSubresource.baseArrayLayer = 0;
+            region.imageSubresource.layerCount = 1;
+            region.imageExtent = { (uint32_t)texWidth, (uint32_t)texHeight, 1 };
+
+            vkCmdCopyBufferToImage(
+                cmd, 
+                alloc.buffer->getNativeBuffer(), 
+                image->getImage(),
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 
+                1, &region
+            );
+            image->recordMipmapGenerationCmds(cmd);
+            // 7. コマンドの送信と完了待機
+            flushImmediate();// todo セマフォ利用に変更して、RenderGraph側で待機させるようにする
+        }else {
+            // Deferred モード
+            auto& state = m_frameStates[m_currentFrameIndex];
+            StagingAllocation alloc = allocateStagingSpace(state, imageSize);
+            std::memcpy(alloc.mappedPtr, pixels, imageSize);
+            stbi_image_free(pixels);
+            // RenderGraphで処理するためにリクエストを積むだけ
+            state.pendingImageUploads.push_back({
+                alloc.buffer, alloc.offset, image.get(), 
+                static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight), mipLevels
+            });
+        }
+        // 8. バインドレスの Sampled Image (Binding 3) として登録
+        image->registerAsSampledImage();
+        return image;
+    }
+    std::vector<rhi::ImageUploadRequest> VulkanUploadManager::getAndClearPendingImageUploads() {
+        auto& state = m_frameStates[m_currentFrameIndex];
+        auto res = std::move(state.pendingImageUploads);
+        state.pendingImageUploads.clear();
+        return res;
+    }
+
+    void VulkanUploadManager::flushImmediate() {
+        m_asyncState.cmdList->end();
+        vkResetFences(m_device.getDevice(), 1, &m_asyncState.syncFence);
+        
+        VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        VkCommandBuffer cmdBuf = m_asyncState.cmdList->getCommandBuffer();
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &cmdBuf;
+        
+        vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, m_asyncState.syncFence);
+        m_asyncState.isSubmitted = true;
+        ensureAsyncReady(); // CPU待機
     }
 }

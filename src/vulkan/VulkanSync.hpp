@@ -22,6 +22,16 @@ namespace rhi::vk{
         return vkFlags;
     }
 
+    inline VkFormat mapFormat(rhi::Format format) {
+        switch (format) {
+        case rhi::Format::R8G8B8A8_Unorm: return VK_FORMAT_R8G8B8A8_UNORM;
+        case rhi::Format::R32G32B32A32_Sfloat: return VK_FORMAT_R32G32B32A32_SFLOAT;
+        // 他のフォーマットも必要に応じて追加
+        default:
+            throw std::runtime_error("Unsupported format!");
+        }
+    }
+
     inline VkImageUsageFlags mapImageUsage(rhi::ImageUsageFlags flags) {
         VkImageUsageFlags vkFlags = 0;
         
