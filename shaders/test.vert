@@ -3,8 +3,8 @@
 
 // C++側の構造体とメモリレイアウトを合わせる
 struct Vertex {
-    vec3 position;
-    vec3 color;
+    vec4 position;
+    vec4 color;
 };
 
 // バインドレス配列としてのStorage Buffer
@@ -27,6 +27,6 @@ void main() {
     Vertex v = vertexBuffers[nonuniformEXT(bufferIdx)].vertices[gl_VertexIndex];
 
     // 3. 出力
-    gl_Position = vec4(v.position, 1.0);
-    outColor = v.color;
+    gl_Position = vec4(v.position.xyz, 1.0);
+    outColor = v.color.rgb;
 }

@@ -34,11 +34,11 @@ void Renderer::render(float time) {
     });
 
     // 頂点データの準備 (省略: 既存のまま)
-    struct Vertex { float x, y, z; float r, g, b; };
+    struct Vertex { float x, y, z, w; float r, g, b, a; };
     std::vector<Vertex> vertices = {
-        {  0.0f, -0.5f, 0.0f,   1.0f, 0.0f, 0.0f },
-        {  0.5f,  0.5f, 0.0f,   0.0f, 1.0f, 0.0f },
-        { -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 1.0f }
+        {  0.0f, -0.5f, 0.0f, 1.0f,   1.0f, 0.0f, 0.0f, 1.0f },
+        {  0.5f,  0.5f, 0.0f, 1.0f,   0.0f, 1.0f, 0.0f, 1.0f },
+        { -0.5f,  0.5f, 0.0f, 1.0f,   0.0f, 0.0f, 1.0f, 1.0f }
     };
     auto vertexBuffer = m_device.createBuffer({
         vertices.size() * sizeof(Vertex),
@@ -59,7 +59,7 @@ void Renderer::render(float time) {
 
     // 3. Graphics Pass の構築 (描画先は Image)
     auto& pass = graph->addGraphicsPass("TestTrianglePass", "shaders/test.vert", "shaders/test.frag")
-        .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.1f, 0.1f, 0.1f, 1.0f})
+        .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0.1f, 0.1f, 0.0f})
         .setTopology(rhi::Topology::TriangleList)
         .setCullMode(rhi::CullMode::None)
         .setDepthTest(false);
@@ -68,7 +68,7 @@ void Renderer::render(float time) {
 
     // 4. Image から Buffer への Copy Pass を追加
     // ※内部のバリア計算で、Image(TransferSrc) -> Buffer(TransferDst) のレイアウト遷移が自動解決されます
-    graph->addCopyPass("CopyToBuffer", hOutputImg, hOutputBuf, pixelBufferSize, rhi::QueueType::Graphics);
+    graph->addCopyPass("CopyToBuffer", hOutputImg, hOutputBuf, pixelBufferSize, rhi::QueueType::Compute);
 
     graph->compile();
 
@@ -84,6 +84,6 @@ void Renderer::render(float time) {
 
     std::cout << "Saving result to graphics_test.png..." << std::endl;
     // Bufferをマップして画像保存
-    ImageExporter::savePng("graphics_test.png", m_width, m_height, outputBuffer->map());
+    ImageExporter::savePngUint8("graphics_test.png", m_width, m_height, outputBuffer->map());
     outputBuffer->unmap();
 }
