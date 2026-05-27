@@ -106,7 +106,7 @@ namespace rhi::vk{
         return buffer;
     }
 
-    std::vector<uint32_t> VulkanComputePipeline::compileGLSLToSPIRV(const std::string& shaderPath) {
+    std::vector<uint32_t> VulkanComputePipeline::compileGLSLToSPIRV(const std::string& shaderPath, shaderc_shader_kind kind) {
         // 1. ソースコードをテキストとして読み込む
         std::ifstream file(shaderPath);
         if (!file.is_open()) {
@@ -124,7 +124,7 @@ namespace rhi::vk{
         // 3. コンパイル実行
         shaderc::SpvCompilationResult result = compiler.CompileGlslToSpv(
             source, 
-            shaderc_compute_shader, 
+            kind, 
             shaderPath.c_str(), 
             options
         );

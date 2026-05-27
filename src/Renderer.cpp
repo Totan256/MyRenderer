@@ -10,107 +10,65 @@
 #include <cstddef>
 #include <vector>
 
-struct StaticUniformData {
-    uint32_t resX;
-    uint32_t resY;
-    float time;
-    float padding;
-};
-
-struct DynamicUniformData {
-    uint32_t offsetX;
-    uint32_t offsetY;
-    float multiplier;
-    uint32_t paletteId;
-};
-
 struct ColorVec4 {
     float r, g, b, a;
 };
 
 void Renderer::render(float time) {
-    auto& vkDevice = static_cast<rhi::vk::VulkanDevice&>(m_device);
 
     // 毎フレームの開始処理 (Ring Buffer 等のリセット)
-    vkDevice.beginFrame();
+    m_device.beginFrame();
 
     std::cout << "--- Initializing Buffers ---" << std::endl;
 
     // 1. 出力先バッファ
     size_t pixelBufferSize = m_width * m_height * sizeof(ColorVec4);
     auto outputBuffer = m_device.createBuffer({pixelBufferSize, rhi::BufferUsageFlags::StorageBuffer, true});
-
-    // 2. SSBO (パレットデータ)
-    std::vector<ColorVec4> palette = {
-        {1.0f, 0.2f, 0.2f, 1.0f}, // 0: Red
-        {0.2f, 1.0f, 0.2f, 1.0f}, // 1: Green
-        {0.2f, 0.2f, 1.0f, 1.0f}, // 2: Blue
-        {1.0f, 1.0f, 0.2f, 1.0f}  // 3: Yellow
+    struct Vertex {
+        float x, y, z;
+        float r, g, b;
     };
-    
-    auto paletteBuffer = m_device.createBuffer({
-        palette.size() * sizeof(ColorVec4), 
-        rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst, 
-        false
-    });
-    
-    // ★ 遅延アップロードの実行 (グラフコンパイル時に自動的に Transfer Queue に乗る)
-    m_device.getUploadManager()->enqueueBufferUpload(paletteBuffer.get(), palette.data(), palette.size() * sizeof(ColorVec4));
 
-    // 3. 静的 Uniform Buffer
-    StaticUniformData staticData = { m_width, m_height, time, 0.0f };
-    auto staticUbo = m_device.createBuffer({
-        sizeof(StaticUniformData), 
-        rhi::BufferUsageFlags::UniformBuffer | rhi::BufferUsageFlags::TransferDst, 
-        false
-    });
-    
-    // ★ 遅延アップロードの実行
-    m_device.getUploadManager()->enqueueBufferUpload(staticUbo.get(), &staticData, sizeof(StaticUniformData));
+    // CPU側で頂点情報を作成
+    std::vector<Vertex> vertices = {
+        {  0.0f, -0.5f, 0.0f,   1.0f, 0.0f, 0.0f }, // 上 (赤)
+        {  0.5f,  0.5f, 0.0f,   0.0f, 1.0f, 0.0f }, // 右下 (緑)
+        { -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 1.0f }  // 左下 (青)
+    };
 
-    m_device.getUploadManager()->submitUploadsAsync(); // アップロード要求を即座に送信（非同期）
-    m_device.getUploadManager()->waitUploads(); // アップロード完了を待機
-    
-    // 4. RenderGraph の構築
+    // Storage Buffer としてGPUメモリを確保 (TransferDstフラグも付ける)
+    auto vertexBuffer = m_device.createBuffer(
+        {vertices.size() * sizeof(Vertex),
+        rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst,
+        true
+    });
+
+    // UploadManager を使ってCPUからGPUへデータを転送
+    m_device.getUploadManager()->enqueueBufferUpload(vertexBuffer.get(), vertices.data(), vertices.size() * sizeof(Vertex));
+
     std::cout << "--- Building Render Graph ---" << std::endl;
     auto graph = m_device.createRenderGraph();
-    
-    auto hOutput    = graph->importResource(outputBuffer.get(), "outputBufferIndex"_hash);
-    auto hPalette   = graph->importResource(paletteBuffer.get(), "paletteIndex"_hash);
-    auto hStaticUbo = graph->importResource(staticUbo.get(), "staticUboIndex"_hash);
 
-    // auto& bindGroup = graph->createBindGroup({
-    //     {offsetof(TestPushConstants, outputBufferIndex), rhi::ResourceState::StorageWrite},
-    //     {offsetof(TestPushConstants, paletteIndex), rhi::ResourceState::StorageRead},
-    //     {offsetof(TestPushConstants, staticUboIndex), rhi::ResourceState::ConstantBuffer}
-    // });
-    auto& pass = graph->addPass("UniformTest", "shaders/uniform_test.comp");
-                      //.bind(bindGroup);
-    uint32_t halfW = m_width / 2;
-    uint32_t halfH = m_height / 2;
-    
-    // Dispatch 0
-    DynamicUniformData dyn0 = {0, 0, 1.0f, 0};
-    pass.dispatch(halfW, halfH, 1)
-        .write(hOutput)
-        .read(hPalette)
-        .readUniform(hStaticUbo)
-        .setUniform("dynamicUboIndex"_hash, dyn0);
+    rhi::Format outputFormat = rhi::Format::R8G8B8A8_Unorm; // 仮
 
-    // Dispatch 1
-    DynamicUniformData dyn1 = {halfW, 0, 1.5f, 1};
-    pass.dispatch(halfW, halfH, 1)
-        .setUniform("dynamicUboIndex"_hash, dyn1);
+    // 1. Graphics Pass の追加
+    auto& pass = graph->addGraphicsPass("TestTrianglePass", "shaders/test.vert", "shaders/test.frag")
+        .setColorFormat(0, outputFormat)
+        .setCullMode(rhi::CullMode::None)
+        .setDepthTest(false);
 
-    // Dispatch 2
-    DynamicUniformData dyn2 = {0, halfH, 0.8f, 2};
-    pass.dispatch(halfW, halfH, 1)
-        .setUniform("dynamicUboIndex"_hash, dyn2);
+    // 2. リソースのバインド
+    // 出力先イメージを ColorAttachment としてバインド (m_outputImage 等)
+    pass.bind(0, rhi::ResourceState::ColorAttachment);
+    pass.bind(4, rhi::ResourceState::StorageRead);
 
-    // Dispatch 3
-    DynamicUniformData dyn3 = {halfW, halfH, 2.0f, 3};
-    pass.dispatch(halfW, halfH, 1)
-        .setUniform("dynamicUboIndex"_hash, dyn3);
+    // 3. Draw コマンドの発行と Push Constants のセット
+    // ResourceHandle からバインドレスインデックスを取得
+    auto vbIndex = graph->importResource(vertexBuffer.get(), "vertexBufferIndex"_hash);
+
+    // 3頂点、1インスタンスを描画
+    pass.draw(3, 1)
+        .read(vbIndex);
 
     // グラフのコンパイル
     graph->compile();
@@ -122,13 +80,13 @@ void Renderer::render(float time) {
     graph->execute();
 
     // フレーム終了処理
-    vkDevice.endFrame();
+    m_device.endFrame();
 
     // 6. 画像保存のため、たった今投げたフレームの完了を待機
     std::cout << "Waiting for frame to complete..." << std::endl;
-    vkDevice.waitForFrame(currentFrame);
+    m_device.waitForFrame(currentFrame);
 
-    std::cout << "Saving result to output_uniform_test.png..." << std::endl;
-    ImageExporter::savePng("output_uniform_test.png", m_width, m_height, outputBuffer->map());
+    std::cout << "Saving result to graphics_test.png..." << std::endl;
+    ImageExporter::savePng("graphics_test.png", m_width, m_height, outputBuffer->map());
     outputBuffer->unmap();
 }

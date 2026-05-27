@@ -3,6 +3,29 @@
 #include "rhi/RHIcommon.hpp"
 
 namespace rhi::vk{
+    inline VkCullModeFlags mapCullMode(rhi::CullMode mode) {
+        switch (mode) {
+            case rhi::CullMode::None: return VK_CULL_MODE_NONE;
+            case rhi::CullMode::Front: return VK_CULL_MODE_FRONT_BIT;
+            case rhi::CullMode::Back: return VK_CULL_MODE_BACK_BIT;
+            case rhi::CullMode::FrontAndBack: return VK_CULL_MODE_FRONT_AND_BACK;
+        }
+        return VK_CULL_MODE_NONE;
+    }
+
+    inline VkCompareOp mapCompareOp(rhi::CompareOp op) {
+        switch (op) {
+            case rhi::CompareOp::Less: return VK_COMPARE_OP_LESS;
+            case rhi::CompareOp::Equal: return VK_COMPARE_OP_EQUAL;
+            case rhi::CompareOp::LessOrEqual: return VK_COMPARE_OP_LESS_OR_EQUAL;
+            case rhi::CompareOp::Greater: return VK_COMPARE_OP_GREATER;
+            case rhi::CompareOp::NotEqual: return VK_COMPARE_OP_NOT_EQUAL;
+            case rhi::CompareOp::GreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+            case rhi::CompareOp::Always: return VK_COMPARE_OP_ALWAYS;
+        }
+        return VK_COMPARE_OP_LESS;
+    }
+    
     inline VkBufferUsageFlags mapBufferUsage(rhi::BufferUsageFlags flags) {
         VkBufferUsageFlags vkFlags = 0;
 

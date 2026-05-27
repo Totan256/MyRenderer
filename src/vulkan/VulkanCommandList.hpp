@@ -18,38 +18,32 @@ namespace rhi::vk{
         // コマンド記録の開始と終了
         void begin() override;
         void end() override;
-
         void submit(SemaphoreHandle waitSemaphore = nullptr, SemaphoreHandle signalSemaphore = nullptr) override;
         void wait() override;
         void reset() override;
-
         // コマンドの送信と完了待機（オフラインレンダリング用）
         void submitAndWait() override;
 
+        // Dynamic Rendering の開始・終了
+        void beginRendering(const std::vector<VkImageView>& colorViews, VkImageView depthView, uint32_t width, uint32_t height);
+        void endRendering();
+        // Extended Dynamic State の設定
+        void setCullMode(VkCullModeFlags cullMode);
+        void setDepthTestEnable(bool enable);
+        void setDepthWriteEnable(bool enable);
+        void setDepthCompareOp(VkCompareOp op);
+        // 描画コマンド
+        void draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance);
+        void drawIndexedIndirectCount(VkBuffer indirectBuffer, VkDeviceSize indirectOffset, VkBuffer countBuffer, VkDeviceSize countOffset, uint32_t maxDrawCount);
+
         // --- コマンド記録用メソッド ---
         
-        // パイプラインをセットする
         void bindPipeline(VulkanComputePipeline& pipeline);
-
-        // ディスクリプタセット（リソース）をセットする
         void bindGlobalDescriptorSet();
 
-        // 計算を実行する (Dispatch)
         void dispatch(uint32_t x, uint32_t y, uint32_t z);
-
         VkCommandBuffer getCommandBuffer()const {return m_commandBuffer;}
 
-        // void setPushResource(uint32_t offset, const VulkanBuffer& resource) {
-        //     uint32_t index = resource.getBindlessIndex();
-        //     setPushData(offset, sizeof(uint32_t), &index);
-        // }
-        // void setPushResource(uint32_t offset, const VulkanImage& resource) {
-        //     uint32_t index = resource.getBindlessIndex();
-        //     setPushData(offset, sizeof(uint32_t), &index);
-        // }
-        // void setPushResource(uint32_t offset, uint32_t index) {
-        //     setPushData(offset, sizeof(uint32_t), &index);
-        // }
         void setPushData(uint32_t offset, uint32_t size, const void* data) {
             // 現在のパイプラインの制限をチェック
             if (offset + size > m_pipeline->getPushContentsSize()) {

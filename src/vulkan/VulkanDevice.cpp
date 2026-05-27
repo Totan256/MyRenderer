@@ -217,7 +217,7 @@ namespace rhi::vk{
     }
 
     void VulkanDevice::createLogicalDevice(){
-        // 6. キュー作成情報の定義（Compute Queue用）
+        // キュー作成情報の定義（Compute Queue用）
         float queuePriority = 1.0f; // キューの優先度
         VkDeviceQueueCreateInfo queueCreateInfo{};
         queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -230,13 +230,33 @@ namespace rhi::vk{
         sync2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
         sync2Features.synchronization2 = VK_TRUE;
 
-        // 7. 有効化するデバイス機能
-        VkPhysicalDeviceFeatures deviceFeatures{};
-        // Descriptor Indexing Feature を有効化
+        // Dynamic Rendering 機能を有効化
+        VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
+        dynamicRenderingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+        dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+        dynamicRenderingFeatures.pNext = &sync2Features;
+        
+        // Extended Dynamic State (EDS) 1 & 2 & 3 の有効化
+        VkPhysicalDeviceExtendedDynamicStateFeaturesEXT edsFeatures{};
+        edsFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+        edsFeatures.extendedDynamicState = VK_TRUE;
+        edsFeatures.pNext = &dynamicRenderingFeatures;
+        VkPhysicalDeviceExtendedDynamicState2FeaturesEXT eds2Features{};
+        eds2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT;
+        eds2Features.extendedDynamicState2 = VK_TRUE;
+        eds2Features.extendedDynamicState2PatchControlPoints = VK_FALSE;
+        eds2Features.extendedDynamicState2LogicOp = VK_FALSE;
+        eds2Features.pNext = &edsFeatures;
+        VkPhysicalDeviceExtendedDynamicState3FeaturesEXT eds3Features{};
+        eds3Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT;
+        eds3Features.extendedDynamicState3PolygonMode = VK_TRUE;
+        eds3Features.extendedDynamicState3DepthClampEnable = VK_TRUE;
+        eds3Features.pNext = &eds2Features;
+
+        // Descriptor Indexing 機能
         VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
-        indexingFeatures.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-        indexingFeatures.pNext = &sync2Features;
+        indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        indexingFeatures.pNext = &eds3Features; // チェーンを繋ぐ
         indexingFeatures.runtimeDescriptorArray = VK_TRUE;
         indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
         indexingFeatures.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
@@ -247,7 +267,11 @@ namespace rhi::vk{
         indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
         indexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 
-        // 8. 論理デバイス作成情報の定義
+        // 有効化するデバイス機能
+        VkPhysicalDeviceFeatures deviceFeatures{};
+        deviceFeatures.multiDrawIndirect = VK_TRUE;
+
+        // 論理デバイス作成情報の定義
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.pNext = &indexingFeatures;
@@ -257,17 +281,21 @@ namespace rhi::vk{
         
         // ToDo: 有効化するデバイス拡張機能
         const std::vector<const char*> deviceExtensions = {
-            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+            VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+            VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,       // Dynamic Rendering
+            VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,  // EDS 1
+            VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,// EDS 2
+            VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME // EDS 3
         };
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-        // 9. 論理デバイスの作成
+        // 論理デバイスの作成
         std::cout << "Creating Logical Device..." << std::endl;
         VK_CHECK(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device));
         std::cout << "Logical Device created successfully!" << std::endl;
 
-        // 10. キューハンドルの取得
+        // キューハンドルの取得
         vkGetDeviceQueue(m_device, m_computeQueueFamilyIndex, 0, &m_computeQueue);
         std::cout << "Compute Queue retrieved." << std::endl;
     }

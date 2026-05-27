@@ -17,6 +17,9 @@ namespace rhi {
     using ResourceHandle = uint32_t;
     const ResourceHandle InvalidResource = 0xFFFFFFFF;
 
+    enum class CullMode { None, Front, Back, FrontAndBack };
+    enum class CompareOp { Less, LessOrEqual, Greater, GreaterOrEqual, Equal, Always, NotEqual };
+
     class BindGroup {
     public:
         BindGroup(const std::vector<ResourceRequirement>& reqs) : requirements(reqs) {}
@@ -32,7 +35,6 @@ namespace rhi {
         virtual DispatchObject& write(ResourceHandle handle) = 0;
         virtual DispatchObject& readUniform(ResourceHandle handle) = 0;
         virtual DispatchObject& setUniformRaw(StringHash nameHash, const void* data, size_t size) = 0;
-
         // テンプレートでのヘルパー
         template<typename T>
         DispatchObject& updateConstant(uint32_t offset, const T& value) {
@@ -44,6 +46,9 @@ namespace rhi {
             static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned");
             return setUniformRaw(nameHash, &value, sizeof(T));
         }
+        // Graphics用のDraw，Indirect描画用パラメータ設定
+        virtual DispatchObject& setDrawParams(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex = 0, uint32_t firstInstance = 0) = 0;
+        virtual DispatchObject& setIndirectParams(ResourceHandle indirectBuffer, size_t indirectOffset, ResourceHandle countBuffer, size_t countOffset, uint32_t maxDrawCount) = 0;
     };
     
 
@@ -53,10 +58,18 @@ namespace rhi {
         virtual ~PassBuilder() = default;
         virtual PassBuilder& bind(const BindGroup& desc) = 0;
         virtual PassBuilder& bind(uint32_t offset, ResourceState state) = 0;
-        // 計算実行
+        // Compute用メソッド
         virtual DispatchObject& dispatch(uint32_t x, uint32_t y, uint32_t z) = 0;
         virtual DispatchObject& dispatchThreads(uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
         virtual PassBuilder& forceBatchBreak() = 0;
+        // Graphics用メソッド
+        virtual PassBuilder& setDepthFormat(Format format) = 0;
+        virtual PassBuilder& setColorFormat(uint32_t attachmentIndex, Format format) = 0;
+        virtual PassBuilder& setCullMode(CullMode mode) = 0;
+        virtual PassBuilder& setDepthTest(bool enable, CompareOp op = CompareOp::Less) = 0;
+        virtual PassBuilder& setDepthWrite(bool enable) = 0;
+        virtual DispatchObject& draw(uint32_t vertexCount, uint32_t instanceCount = 1) = 0;
+        virtual DispatchObject& drawIndexedIndirectCount(ResourceHandle indirectBuffer, ResourceHandle countBuffer, uint32_t maxDrawCount) = 0;
 
     protected:
     };
@@ -88,6 +101,8 @@ namespace rhi {
     struct LogicalPass {// Tod最適化検討
         std::string name;
         std::string shaderPath;
+        std::string vertShaderPath; // Graphics用
+        std::string fragShaderPath; // Graphics用
         PassType type = PassType::Compute;
         QueueType queueType = QueueType::Compute;
         // パスのシグネチャ (オフセット -> Usage)
@@ -95,6 +110,15 @@ namespace rhi {
         std::vector<ResourceHandle> resourceHandles;
         std::vector<ResourceRequirement> requirements;
         bool forceBatchBreak = false; // このパスの前でバッチを分割するフラグ
+
+        // Graphics用のステート保存
+        std::map<uint32_t, Format> colorFormats;
+        Format depthFormat = Format::R8G8B8A8_Unorm; // プレースホルダ
+        bool hasDepth = false;
+        CullMode cullMode = CullMode::Back;
+        bool depthTestEnable = true;
+        bool depthWriteEnable = true;
+        CompareOp depthCompareOp = CompareOp::Less;
         
         struct DispatchState {
             uint32_t id;
@@ -107,6 +131,20 @@ namespace rhi {
             // struct UBOBinding { uint32_t index; uint32_t offset; };
             // std::map<uint32_t, UBOBinding> uboBindings;
             uint32_t x = 1, y = 1, z = 1;
+
+            // Draw用の状態
+            uint32_t vertexCount = 0;
+            uint32_t instanceCount = 0;
+            uint32_t firstVertex = 0;
+            uint32_t firstInstance = 0;
+            
+            // Indirect描画用の状態
+            bool isIndirect = false;
+            ResourceHandle indirectBuffer = InvalidResource;
+            size_t indirectOffset = 0;
+            ResourceHandle countBuffer = InvalidResource;
+            size_t countOffset = 0;
+            uint32_t maxDrawCount = 0;
         };
         uint32_t localSizeX = 1;
         uint32_t localSizeY = 1;
@@ -115,6 +153,8 @@ namespace rhi {
         std::deque<DispatchState> dispatchStates;
 
         std::function<void(rhi::CommandList&)> callback; // Callback Pass用
+
+        
     };
 
     // レンダーグラフ本体
@@ -131,6 +171,7 @@ namespace rhi {
             return *m_bindGroups.back();
         }
         virtual PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) = 0;
+        virtual PassBuilder& addGraphicsPass(const std::string& name, const std::string& vertShaderPath, const std::string& fragShaderPath) = 0;
         virtual void addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType) = 0;
 
         // バリアの計算

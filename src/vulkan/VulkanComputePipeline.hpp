@@ -20,7 +20,7 @@ namespace rhi::vk{
         uint32_t getPushContentsSize() const {return m_pushContentsSize;}
         // ファイル読み込みヘルパー
         static std::vector<uint32_t> readFile(const std::string& filename);
-        static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath);
+        static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath, shaderc_shader_kind kind = shaderc_compute_shader);
     private:
         VulkanDevice& m_device; // デバイスへの参照を保持
         const uint32_t m_pushContentsSize;

@@ -114,9 +114,62 @@ namespace rhi::vk {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
 
-        // 完了を待つ（オフラインレンダリングなので）
-        // ToDo：リアルタイムレンダリング用に書き換え
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
+    }
+
+    void VulkanCommandList::beginRendering(const std::vector<VkImageView>& colorViews, VkImageView depthView, uint32_t width, uint32_t height) {
+        std::vector<VkRenderingAttachmentInfo> colorAttachments;
+        for (auto view : colorViews) {
+            VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            colorAttachment.imageView = view;
+            colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // Todo 実験用。後でRenderGraphから設定可能にする
+            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            colorAttachment.clearValue.color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            colorAttachments.push_back(colorAttachment);
+        }
+
+        VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        if (depthView != VK_NULL_HANDLE) {
+            depthAttachment.imageView = depthView;
+            depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
+        }
+
+        VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
+        renderingInfo.renderArea = { {0, 0}, {width, height} };
+        renderingInfo.layerCount = 1;
+        renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
+        renderingInfo.pColorAttachments = colorAttachments.data();
+        if (depthView != VK_NULL_HANDLE) {
+            renderingInfo.pDepthAttachment = &depthAttachment;
+        }
+
+        vkCmdBeginRendering(m_commandBuffer, &renderingInfo);
+
+        // Viewport / Scissor は画面サイズ全体をデフォルトとする (必要なら後で外に出す)
+        VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+        vkCmdSetViewport(m_commandBuffer, 0, 1, &viewport);
+        VkRect2D scissor{ {0, 0}, {width, height} };
+        vkCmdSetScissor(m_commandBuffer, 0, 1, &scissor);
+    }
+
+    void VulkanCommandList::endRendering() { vkCmdEndRendering(m_commandBuffer); }
+
+    // Extended Dynamic States (Vulkan 1.3 / EDS拡張)
+    void VulkanCommandList::setCullMode(VkCullModeFlags cullMode) { vkCmdSetCullMode(m_commandBuffer, cullMode); }
+    void VulkanCommandList::setDepthTestEnable(bool enable) { vkCmdSetDepthTestEnable(m_commandBuffer, enable ? VK_TRUE : VK_FALSE); }
+    void VulkanCommandList::setDepthWriteEnable(bool enable) { vkCmdSetDepthWriteEnable(m_commandBuffer, enable ? VK_TRUE : VK_FALSE); }
+    void VulkanCommandList::setDepthCompareOp(VkCompareOp op) { vkCmdSetDepthCompareOp(m_commandBuffer, op); }
+
+    void VulkanCommandList::draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) { vkCmdDraw(m_commandBuffer, vertexCount, instanceCount, firstVertex, firstInstance); }
+
+    void VulkanCommandList::drawIndexedIndirectCount(VkBuffer indirectBuffer, VkDeviceSize indirectOffset, VkBuffer countBuffer, VkDeviceSize countOffset, uint32_t maxDrawCount) {
+        // ※ Vulkan 1.2 コア機能
+        uint32_t stride = sizeof(VkDrawIndexedIndirectCommand);
+        vkCmdDrawIndexedIndirectCount(m_commandBuffer, indirectBuffer, indirectOffset, countBuffer, countOffset, maxDrawCount, stride);
     }
 
     void VulkanCommandList::bindPipeline(VulkanComputePipeline& pipeline) {
