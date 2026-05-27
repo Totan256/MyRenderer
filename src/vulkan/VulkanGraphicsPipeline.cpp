@@ -28,9 +28,9 @@ namespace rhi::vk {
     void VulkanGraphicsPipeline::createPipeline(const std::string& vertPath, const std::string& fragPath, const std::vector<VkFormat>& colorFormats, VkFormat depthFormat) {
         VkDevice device = m_device.getDevice();
 
-        // 1. シェーダーモジュールの作成 (ここではCompute用関数を流用しますが、Shadercの引数変更が必要になる場合があります)
-        auto vertCode = VulkanComputePipeline::compileGLSLToSPIRV(vertPath); // TODO: Vertex用コンパイルに対応
-        auto fragCode = VulkanComputePipeline::compileGLSLToSPIRV(fragPath); // TODO: Fragment用コンパイルに対応
+        // 1. シェーダーモジュールの作成
+        auto vertCode = VulkanComputePipeline::compileGLSLToSPIRV(vertPath, shaderc_vertex_shader);
+        auto fragCode = VulkanComputePipeline::compileGLSLToSPIRV(fragPath, shaderc_fragment_shader);
         
         VkShaderModuleCreateInfo vertInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         vertInfo.codeSize = vertCode.size() * sizeof(uint32_t);

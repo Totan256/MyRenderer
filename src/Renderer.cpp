@@ -13,80 +13,77 @@
 struct ColorVec4 {
     float r, g, b, a;
 };
-
 void Renderer::render(float time) {
-
-    // 毎フレームの開始処理 (Ring Buffer 等のリセット)
     m_device.beginFrame();
 
-    std::cout << "--- Initializing Buffers ---" << std::endl;
+    std::cout << "--- Initializing Buffers & Images ---" << std::endl;
 
-    // 1. 出力先バッファ
-    size_t pixelBufferSize = m_width * m_height * sizeof(ColorVec4);
-    auto outputBuffer = m_device.createBuffer({pixelBufferSize, rhi::BufferUsageFlags::StorageBuffer, true});
-    struct Vertex {
-        float x, y, z;
-        float r, g, b;
-    };
-
-    // CPU側で頂点情報を作成
-    std::vector<Vertex> vertices = {
-        {  0.0f, -0.5f, 0.0f,   1.0f, 0.0f, 0.0f }, // 上 (赤)
-        {  0.5f,  0.5f, 0.0f,   0.0f, 1.0f, 0.0f }, // 右下 (緑)
-        { -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 1.0f }  // 左下 (青)
-    };
-
-    // Storage Buffer としてGPUメモリを確保 (TransferDstフラグも付ける)
-    auto vertexBuffer = m_device.createBuffer(
-        {vertices.size() * sizeof(Vertex),
-        rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst,
-        true
+    // 1. レンダリングターゲット用の Image を作成 (GPU上)
+    auto outputImage = m_device.createImage({
+        m_width, m_height, 1, 1, 1, 
+        rhi::Format::R8G8B8A8_Unorm,
+        rhi::ImageUsageFlags::ColorAttachment | rhi::ImageUsageFlags::TransferSrc | rhi::ImageUsageFlags::Storage // 描画先 兼 コピー元
     });
 
-    // UploadManager を使ってCPUからGPUへデータを転送
+    // 2. CPU読み取り用の Buffer を作成 (CPU可視)
+    size_t pixelBufferSize = m_width * m_height * 4; // 4 bytes per pixel (RGBA8)
+    auto outputBuffer = m_device.createBuffer({
+        pixelBufferSize, 
+        rhi::BufferUsageFlags::TransferDst | rhi::BufferUsageFlags::StorageBuffer, // コピー先
+        true // CPU 可視
+    });
+
+    // 頂点データの準備 (省略: 既存のまま)
+    struct Vertex { float x, y, z; float r, g, b; };
+    std::vector<Vertex> vertices = {
+        {  0.0f, -0.5f, 0.0f,   1.0f, 0.0f, 0.0f },
+        {  0.5f,  0.5f, 0.0f,   0.0f, 1.0f, 0.0f },
+        { -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 1.0f }
+    };
+    auto vertexBuffer = m_device.createBuffer({
+        vertices.size() * sizeof(Vertex),
+        rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst,
+        false
+    });
     m_device.getUploadManager()->enqueueBufferUpload(vertexBuffer.get(), vertices.data(), vertices.size() * sizeof(Vertex));
+    m_device.getUploadManager()->submitUploadsAsync();
+    m_device.getUploadManager()->waitUploads();
 
     std::cout << "--- Building Render Graph ---" << std::endl;
     auto graph = m_device.createRenderGraph();
 
-    rhi::Format outputFormat = rhi::Format::R8G8B8A8_Unorm; // 仮
+    // グラフにリソースを登録
+    auto hOutputImg = graph->importResource(outputImage.get(), "outputImage"_hash);
+    auto hOutputBuf = graph->importResource(outputBuffer.get(), "outputBuffer"_hash);
+    auto vbIndex = graph->importResource(vertexBuffer.get(), "vertexBufferIndex"_hash);
 
-    // 1. Graphics Pass の追加
+    // 3. Graphics Pass の構築 (描画先は Image)
     auto& pass = graph->addGraphicsPass("TestTrianglePass", "shaders/test.vert", "shaders/test.frag")
-        .setColorFormat(0, outputFormat)
+        .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.1f, 0.1f, 0.1f, 1.0f})
+        .setTopology(rhi::Topology::TriangleList)
         .setCullMode(rhi::CullMode::None)
         .setDepthTest(false);
 
-    // 2. リソースのバインド
-    // 出力先イメージを ColorAttachment としてバインド (m_outputImage 等)
-    pass.bind(0, rhi::ResourceState::ColorAttachment);
-    pass.bind(4, rhi::ResourceState::StorageRead);
+    pass.draw(3, 1).read(vbIndex);
 
-    // 3. Draw コマンドの発行と Push Constants のセット
-    // ResourceHandle からバインドレスインデックスを取得
-    auto vbIndex = graph->importResource(vertexBuffer.get(), "vertexBufferIndex"_hash);
+    // 4. Image から Buffer への Copy Pass を追加
+    // ※内部のバリア計算で、Image(TransferSrc) -> Buffer(TransferDst) のレイアウト遷移が自動解決されます
+    graph->addCopyPass("CopyToBuffer", hOutputImg, hOutputBuf, pixelBufferSize, rhi::QueueType::Graphics);
 
-    // 3頂点、1インスタンスを描画
-    pass.draw(3, 1)
-        .read(vbIndex);
-
-    // グラフのコンパイル
     graph->compile();
 
     uint64_t currentFrame = m_device.getCurrentFrame();
 
-    // 5. 実行 (フェンスをシグナルし、CPUは待たずに即座に抜ける)
     std::cout << "--- Executing Render Graph ---" << std::endl;
-    graph->execute();
+    graph->execute({});
 
-    // フレーム終了処理
     m_device.endFrame();
 
-    // 6. 画像保存のため、たった今投げたフレームの完了を待機
     std::cout << "Waiting for frame to complete..." << std::endl;
     m_device.waitForFrame(currentFrame);
 
     std::cout << "Saving result to graphics_test.png..." << std::endl;
+    // Bufferをマップして画像保存
     ImageExporter::savePng("graphics_test.png", m_width, m_height, outputBuffer->map());
     outputBuffer->unmap();
 }

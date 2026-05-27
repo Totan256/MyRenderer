@@ -12,6 +12,12 @@ namespace rhi::vk{
 
     class VulkanCommandList : public CommandList {
     public:
+        struct RenderAttachment {
+            VkImageView view;
+            VkAttachmentLoadOp loadOp;
+            VkAttachmentStoreOp storeOp;
+            VkClearValue clearValue;
+        };
         VulkanCommandList(VulkanDevice& device, QueueType queueType);
         ~VulkanCommandList() override;
         
@@ -25,7 +31,9 @@ namespace rhi::vk{
         void submitAndWait() override;
 
         // Dynamic Rendering の開始・終了
-        void beginRendering(const std::vector<VkImageView>& colorViews, VkImageView depthView, uint32_t width, uint32_t height);
+        void beginRendering(const std::vector<RenderAttachment>& colorAtts, const RenderAttachment* depthAtt, uint32_t width, uint32_t height);
+        void setTopology(VkPrimitiveTopology topology);
+        void setFrontFace(VkFrontFace frontFace);
         void endRendering();
         // Extended Dynamic State の設定
         void setCullMode(VkCullModeFlags cullMode);

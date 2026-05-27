@@ -298,6 +298,8 @@ namespace rhi::vk{
         // キューハンドルの取得
         vkGetDeviceQueue(m_device, m_computeQueueFamilyIndex, 0, &m_computeQueue);
         std::cout << "Compute Queue retrieved." << std::endl;
+        vkGetDeviceQueue(m_device, m_graphicsQueueFamilyIndex, 0, &m_graphicsQueue);
+        std::cout << "Graphics Queue retrieved." << std::endl;
     }
 
     void VulkanDevice::createAllocator(){

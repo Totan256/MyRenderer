@@ -117,43 +117,45 @@ namespace rhi::vk {
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
     }
 
-    void VulkanCommandList::beginRendering(const std::vector<VkImageView>& colorViews, VkImageView depthView, uint32_t width, uint32_t height) {
+    void VulkanCommandList::beginRendering(const std::vector<RenderAttachment>& colorAtts, const RenderAttachment* depthAtt, uint32_t width, uint32_t height) {
         std::vector<VkRenderingAttachmentInfo> colorAttachments;
-        for (auto view : colorViews) {
+        for (const auto& att : colorAtts) {
             VkRenderingAttachmentInfo colorAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-            colorAttachment.imageView = view;
+            colorAttachment.imageView = att.view;
             colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // Todo 実験用。後でRenderGraphから設定可能にする
-            colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            colorAttachment.clearValue.color = { 0.0f, 0.0f, 0.0f, 1.0f };
+            colorAttachment.loadOp = att.loadOp;
+            colorAttachment.storeOp = att.storeOp;
+            colorAttachment.clearValue = att.clearValue;
             colorAttachments.push_back(colorAttachment);
         }
-
         VkRenderingAttachmentInfo depthAttachment{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        if (depthView != VK_NULL_HANDLE) {
-            depthAttachment.imageView = depthView;
+        if (depthAtt) {
+            depthAttachment.imageView = depthAtt->view;
             depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-            depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            depthAttachment.clearValue.depthStencil = { 1.0f, 0 };
+            depthAttachment.loadOp = depthAtt->loadOp;
+            depthAttachment.storeOp = depthAtt->storeOp;
+            depthAttachment.clearValue = depthAtt->clearValue;
         }
-
         VkRenderingInfo renderingInfo{ VK_STRUCTURE_TYPE_RENDERING_INFO };
         renderingInfo.renderArea = { {0, 0}, {width, height} };
         renderingInfo.layerCount = 1;
         renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size());
         renderingInfo.pColorAttachments = colorAttachments.data();
-        if (depthView != VK_NULL_HANDLE) {
+        if (depthAtt) {
             renderingInfo.pDepthAttachment = &depthAttachment;
         }
-
         vkCmdBeginRendering(m_commandBuffer, &renderingInfo);
-
-        // Viewport / Scissor は画面サイズ全体をデフォルトとする (必要なら後で外に出す)
+        // Viewport / Scissor
         VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
         vkCmdSetViewport(m_commandBuffer, 0, 1, &viewport);
         VkRect2D scissor{ {0, 0}, {width, height} };
         vkCmdSetScissor(m_commandBuffer, 0, 1, &scissor);
+    }
+    void VulkanCommandList::setTopology(VkPrimitiveTopology topology) {
+        vkCmdSetPrimitiveTopology(m_commandBuffer, topology); // EDS1 拡張機能
+    }
+    void VulkanCommandList::setFrontFace(VkFrontFace frontFace) {
+        vkCmdSetFrontFace(m_commandBuffer, frontFace); // EDS1 拡張機能
     }
 
     void VulkanCommandList::endRendering() { vkCmdEndRendering(m_commandBuffer); }

@@ -7,6 +7,7 @@
 #include <variant>
 #include <map>
 #include <memory>
+#include <optional>
 #include "RHIcommon.hpp"
 #include "RHIForward.hpp"
 #include "rhi/Resource.hpp"
@@ -68,6 +69,10 @@ namespace rhi {
         virtual PassBuilder& setCullMode(CullMode mode) = 0;
         virtual PassBuilder& setDepthTest(bool enable, CompareOp op = CompareOp::Less) = 0;
         virtual PassBuilder& setDepthWrite(bool enable) = 0;
+        virtual PassBuilder& addColorOutput(uint32_t location, ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, ColorClearValue clearValue = {0,0,0,1}) = 0;
+        virtual PassBuilder& setDepthOutput(ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, DepthClearValue clearValue = {1.0f, 0}) = 0;
+        virtual PassBuilder& setTopology(Topology topology) = 0;
+        virtual PassBuilder& setFrontFace(FrontFace face) = 0;
         virtual DispatchObject& draw(uint32_t vertexCount, uint32_t instanceCount = 1) = 0;
         virtual DispatchObject& drawIndexedIndirectCount(ResourceHandle indirectBuffer, ResourceHandle countBuffer, uint32_t maxDrawCount) = 0;
 
@@ -154,6 +159,23 @@ namespace rhi {
 
         std::function<void(rhi::CommandList&)> callback; // Callback Pass用
 
+        struct ColorAttachmentInfo {
+            uint32_t location;
+            ResourceHandle handle;
+            LoadOp loadOp;
+            StoreOp storeOp;
+            ColorClearValue clearValue;
+        };
+        struct DepthAttachmentInfo {
+            ResourceHandle handle;
+            LoadOp loadOp;
+            StoreOp storeOp;
+            DepthClearValue clearValue;
+        };
+        std::vector<ColorAttachmentInfo> colorAttachments;
+        std::optional<DepthAttachmentInfo> depthAttachment;
+        Topology topology = Topology::TriangleList;
+        FrontFace frontFace = FrontFace::CounterClockwise;
         
     };
 

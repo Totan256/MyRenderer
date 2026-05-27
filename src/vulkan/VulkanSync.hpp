@@ -13,6 +13,38 @@ namespace rhi::vk{
         return VK_CULL_MODE_NONE;
     }
 
+    inline VkAttachmentLoadOp mapLoadOp(rhi::LoadOp op) {
+        switch (op) {
+            case rhi::LoadOp::Load: return VK_ATTACHMENT_LOAD_OP_LOAD;
+            case rhi::LoadOp::Clear: return VK_ATTACHMENT_LOAD_OP_CLEAR;
+            case rhi::LoadOp::DontCare: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        }
+        return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    }
+
+    inline VkAttachmentStoreOp mapStoreOp(rhi::StoreOp op) {
+        switch (op) {
+            case rhi::StoreOp::Store: return VK_ATTACHMENT_STORE_OP_STORE;
+            case rhi::StoreOp::DontCare: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        }
+        return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    }
+
+    inline VkPrimitiveTopology mapTopology(rhi::Topology topology) {
+        switch(topology) {
+            case rhi::Topology::PointList: return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+            case rhi::Topology::LineList: return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+            case rhi::Topology::LineStrip: return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+            case rhi::Topology::TriangleList: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            case rhi::Topology::TriangleStrip: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        }
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    }
+
+    inline VkFrontFace mapFrontFace(rhi::FrontFace face) {
+        return face == rhi::FrontFace::Clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    }
+
     inline VkCompareOp mapCompareOp(rhi::CompareOp op) {
         switch (op) {
             case rhi::CompareOp::Less: return VK_COMPARE_OP_LESS;
@@ -25,7 +57,7 @@ namespace rhi::vk{
         }
         return VK_COMPARE_OP_LESS;
     }
-    
+
     inline VkBufferUsageFlags mapBufferUsage(rhi::BufferUsageFlags flags) {
         VkBufferUsageFlags vkFlags = 0;
 

@@ -144,7 +144,28 @@ namespace rhi::vk {
         PassBuilder& setCullMode(CullMode mode) override { m_node.cullMode = mode; return *this; }
         PassBuilder& setDepthTest(bool enable, CompareOp op) override { m_node.depthTestEnable = enable; m_node.depthCompareOp = op; return *this; }
         PassBuilder& setDepthWrite(bool enable) override { m_node.depthWriteEnable = enable; return *this; }
-
+        PassBuilder& addColorOutput(uint32_t location, ResourceHandle handle, LoadOp loadOp, StoreOp storeOp, ColorClearValue clearValue) override {
+            m_node.colorAttachments.push_back({location, handle, loadOp, storeOp, clearValue});
+            // バリア解決のために自動で要件として登録する
+            m_node.resourceHandles.push_back(handle);
+            // location がオフセットと衝突しないよう、適当なハッシュやダミー値をオフセットにする
+            m_node.requirements.push_back({0x10000 + location, rhi::ResourceState::ColorAttachment, rhi::ShaderStage::Fragment});
+            return *this;
+        }
+        PassBuilder& setDepthOutput(ResourceHandle handle, LoadOp loadOp, StoreOp storeOp, DepthClearValue clearValue) override {
+            m_node.depthAttachment = {handle, loadOp, storeOp, clearValue};
+            m_node.resourceHandles.push_back(handle);
+            m_node.requirements.push_back({0x20000, rhi::ResourceState::DepthStencilWrite, rhi::ShaderStage::Fragment});
+            return *this;
+        }
+        PassBuilder& setTopology(Topology topology) override {
+            m_node.topology = topology;
+            return *this;
+        }
+        PassBuilder& setFrontFace(FrontFace face) override {
+            m_node.frontFace = face;
+            return *this;
+        }
         DispatchObject& draw(uint32_t vertexCount, uint32_t instanceCount) override {
             auto& obj = m_graph.createDispatch(m_node, 1, 1, 1).setDrawParams(vertexCount, instanceCount);
             return obj;
@@ -372,40 +393,26 @@ namespace rhi::vk {
                     m_graphicsPipelines[pipeKey] = std::make_unique<VulkanGraphicsPipeline>(
                         m_device, node.vertShaderPath, node.fragShaderPath, vkColorFormats, vkDepthFormat, MAX_PUSH_CONSTANT_SIZE);
                 }
+            }else if (node.type == PassType::GenerateMipmaps) {
+                
             }
-            node.resourceHandles.clear();
-            node.requirements.clear();
-            std::set<ResourceHandle> seenHandles; // 重複排除用
+            // node.resourceHandles.clear();
+            // node.requirements.clear();
+            std::set<ResourceHandle> seenHandles;
+            for (auto handle : node.resourceHandles) {
+                seenHandles.insert(handle);
+            }
 
             for (const auto& ds : node.dispatchStates) {
                 for (const auto& [offset, handle] : ds.resourceOffsets) {
-                    if (node.type == PassType::Copy) continue;  // PassType::Copyの時はsignatureがないので特別扱い
                     auto it = node.signature.find(offset);
-                    // ここに到達した時点でシグネチャとの整合性は setResource で保証されている，はず
-                    
-                    // todo: マルチディスパッチ時の競合チェック（同一リソースの読み書き衝突検知）はここに実装する
-                    // ds（ディスパッチ）を跨いで同じ handle が isWriteUsage でアクセスされていないか等
-
-                    if (seenHandles.insert(handle).second) {
-                        node.resourceHandles.push_back(handle);
-                        node.requirements.push_back({offset, it->second, rhi::ShaderStage::Compute}); // Compute固定　todo他のstage
-                        
-                        // 基底クラスのソート機能のために producers / consumers を更新
-                        if (isWriteUsage(it->second)) {
-                            m_resourceRegistry[handle].producers.push_back((uint32_t)passIndex);
-                        } else {
-                            m_resourceRegistry[handle].consumers.push_back((uint32_t)passIndex);
+                    if (it != node.signature.end()) {
+                        // まだ要件として登録されていないリソースのみ追記する
+                        if (seenHandles.insert(handle).second) {
+                            node.resourceHandles.push_back(handle);
+                            node.requirements.push_back({offset, it->second, rhi::ShaderStage::Compute}); 
+                            // ※必要に応じて Fragment/Vertex 等も考慮
                         }
-                    }
-                }
-            }
-            // Copyパスの依存関係はすでに追加済みなので producers/consumers だけ登録
-            if (node.type == PassType::Copy) {
-                for(size_t i=0; i<node.resourceHandles.size(); ++i) {
-                    if (isWriteUsage(node.requirements[i].state)) {
-                        m_resourceRegistry[node.resourceHandles[i]].producers.push_back((uint32_t)passIndex);
-                    } else {
-                        m_resourceRegistry[node.resourceHandles[i]].consumers.push_back((uint32_t)passIndex);
                     }
                 }
             }
@@ -624,24 +631,37 @@ namespace rhi::vk {
 
                 if (logicalNode.type == PassType::Copy) {
                     for(auto& ds : logicalNode.dispatchStates) {
-                        rhi::Buffer* physSrc = m_resourceAllocator.getPhysicalBuffer(ds.resourceOffsets[0]);
+                        rhi::ResourceHandle hSrc = ds.resourceOffsets[0];
                         rhi::ResourceHandle hDst = ds.resourceOffsets[1];
                         
-                        if (m_resourceRegistry[hDst].isImage()) {
-                            VulkanImage* physDstImg = m_resourceAllocator.getPhysicalImage(hDst);
-                            VulkanBuffer* physSrcBuf = static_cast<VulkanBuffer*>(physSrc);
+                        bool srcIsImage = m_resourceRegistry[hSrc].isImage();
+                        bool dstIsImage = m_resourceRegistry[hDst].isImage();
+
+                        if (srcIsImage && !dstIsImage) { // Image から Buffer へのコピー
+                            VulkanImage* physSrcImg = m_resourceAllocator.getPhysicalImage(hSrc);
+                            VulkanBuffer* physDstBuf = static_cast<VulkanBuffer*>(m_resourceAllocator.getPhysicalBuffer(hDst));
                             VkBufferImageCopy region{};
-                            region.bufferOffset = ds.z; // stagingOffset
+                            region.bufferOffset = ds.z; // stagingOffset 等として使用
                             region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-                            region.imageExtent = { ds.x, ds.y, 1 };
-                            vkCmdCopyBufferToImage(vkCmdBuf, physSrcBuf->getNativeBuffer(), physDstImg->getImage(),
-                                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-                        } else {
+                            region.imageExtent = { physSrcImg->getDesc().width, physSrcImg->getDesc().height, 1 };
+                            vkCmdCopyImageToBuffer(vkCmdBuf, physSrcImg->getImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, physDstBuf->getNativeBuffer(), 1, &region);
+                        } 
+                        else if (!srcIsImage && dstIsImage) { // Buffer -> Image
+                            VulkanImage* physDstImg = m_resourceAllocator.getPhysicalImage(hDst);
+                            VulkanBuffer* physSrcBuf = static_cast<VulkanBuffer*>(m_resourceAllocator.getPhysicalBuffer(hSrc));
+                            VkBufferImageCopy region{};
+                            region.bufferOffset = ds.z; 
+                            region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+                            region.imageExtent = { physDstImg->getDesc().width, physDstImg->getDesc().height, 1 };
+                            vkCmdCopyBufferToImage(vkCmdBuf, physSrcBuf->getNativeBuffer(), physDstImg->getImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                        } 
+                        else if (!srcIsImage && !dstIsImage) { // Buffer -> Buffer
+                            rhi::Buffer* physSrc = m_resourceAllocator.getPhysicalBuffer(hSrc);
                             rhi::Buffer* physDst = m_resourceAllocator.getPhysicalBuffer(hDst);
                             batch.cmdList->copyBuffer(physSrc, physDst, ds.x, ds.y, 0);
                         }
                     }
-                } 
+                }
                 else if (logicalNode.type == PassType::Compute) {
                     if (!logicalNode.shaderPath.empty()) {
                         auto* pipeline = m_pipelines[logicalNode.shaderPath].get();
@@ -688,33 +708,68 @@ namespace rhi::vk {
                     VkCommandBuffer cmdBuf = vkCmd->getCommandBuffer();
 
                     if (pipeline) {
-                        std::vector<VkImageView> colorViews;
-                        VkImageView depthView = VK_NULL_HANDLE;
+                        std::vector<VulkanCommandList::RenderAttachment> vkColorAtts;
+                        std::optional<VulkanCommandList::RenderAttachment> vkDepthAtt = std::nullopt;
                         uint32_t width = 0, height = 0;
-                        for (size_t i = 0; i < logicalNode.resourceHandles.size(); ++i) {
-                            ResourceHandle h = logicalNode.resourceHandles[i];
-                            const auto& req = logicalNode.requirements[i];
-                            if (req.state == rhi::ResourceState::ColorAttachment) {
-                                VulkanImage* img = m_resourceAllocator.getPhysicalImage(h);
-                                colorViews.push_back(img->getView());
-                                width = img->getDesc().width; height = img->getDesc().height;
-                            } else if (req.state == rhi::ResourceState::DepthStencilWrite) {
-                                VulkanImage* img = m_resourceAllocator.getPhysicalImage(h);
-                                depthView = img->getView();
-                                if (width == 0) { width = img->getDesc().width; height = img->getDesc().height; }
+                        // 1. カラーアタッチメントの構築
+                        std::vector<LogicalPass::ColorAttachmentInfo> sortedAtts = logicalNode.colorAttachments;
+                        // location順にソートして、シェーダーの layout(location = X) と一致させる
+                        std::sort(sortedAtts.begin(), sortedAtts.end(), [](const auto& a, const auto& b){ return a.location < b.location; });
+                        for (const auto& att : sortedAtts) {
+                            VulkanImage* img = m_resourceAllocator.getPhysicalImage(att.handle);
+                            // 最初の有効なアタッチメントから解像度を取得
+                            if (width == 0) { 
+                                width = img->getDesc().width; 
+                                height = img->getDesc().height; 
                             }
+                            VkClearValue clearVal{};
+                            clearVal.color = {{att.clearValue.r, att.clearValue.g, att.clearValue.b, att.clearValue.a}};
+                            vkColorAtts.push_back({
+                                img->getView(),
+                                mapLoadOp(att.loadOp),
+                                mapStoreOp(att.storeOp),
+                                clearVal
+                            });
                         }
-                        vkCmd->beginRendering(colorViews, depthView, width, height);
+                        // 2. 深度アタッチメントの構築処理
+                        if (logicalNode.depthAttachment.has_value()) {
+                            const auto& depthInfo = logicalNode.depthAttachment.value();
+                            VulkanImage* depthImg = m_resourceAllocator.getPhysicalImage(depthInfo.handle);
+                            // Z-Prepass等、カラー出力がなく深度出力のみのパスの場合にここで解像度を取得する
+                            if (width == 0) { 
+                                width = depthImg->getDesc().width; 
+                                height = depthImg->getDesc().height; 
+                            }
+                            VkClearValue clearVal{};
+                            // DepthClearValueから深度とステンシルを設定
+                            clearVal.depthStencil = { depthInfo.clearValue.depth, depthInfo.clearValue.stencil };
+                            vkDepthAtt = {
+                                depthImg->getView(),
+                                mapLoadOp(depthInfo.loadOp),
+                                mapStoreOp(depthInfo.storeOp),
+                                clearVal
+                            };
+                        }
+                        // 解像度が0の場合は描画領域がないのでスキップするかエラーにする
+                        if (width == 0 || height == 0) {
+                            throw std::runtime_error("Render target resolution is 0x0");
+                            continue;
+                        }
+                        // 3. レンダリングの開始 (Dynamic Rendering)
+                        const rhi::vk::VulkanCommandList::RenderAttachment* pDepthAtt = vkDepthAtt.has_value() ? &vkDepthAtt.value() : nullptr;
+                        vkCmd->beginRendering(vkColorAtts, pDepthAtt, width, height);
+
                         // パイプラインとディスクリプタのバインド
                         vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->getPipeline());
                         VkDescriptorSet globalSet = m_device.getBindlessDescriptorSet();
                         vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->getPipelineLayout(), 0, 1, &globalSet, 0, nullptr);
                         // Dynamic State の適用
+                        vkCmd->setTopology(mapTopology(logicalNode.topology));
                         vkCmd->setCullMode(mapCullMode(logicalNode.cullMode));
+                        vkCmd->setFrontFace(mapFrontFace(logicalNode.frontFace));
                         vkCmd->setDepthTestEnable(logicalNode.depthTestEnable);
                         vkCmd->setDepthWriteEnable(logicalNode.depthWriteEnable);
                         vkCmd->setDepthCompareOp(mapCompareOp(logicalNode.depthCompareOp));
-                        // vkCmdSetPrimitiveTopology(cmdBuf, mapTopology(logicalNode.topology));
                         // Drawの発行
                         for (auto& state : logicalNode.dispatchStates) {
                             // todo Computeと同じ処理を共通化

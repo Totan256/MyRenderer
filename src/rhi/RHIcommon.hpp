@@ -82,6 +82,13 @@ namespace rhi {
         }
     };
 
+    enum class LoadOp { Load, Clear, DontCare };
+    enum class StoreOp { Store, DontCare };
+    struct ColorClearValue { float r, g, b, a; };
+    struct DepthClearValue { float depth; uint32_t stencil; };
+    enum class Topology { PointList, LineList, LineStrip, TriangleList, TriangleStrip };
+    enum class FrontFace { CounterClockwise, Clockwise };
+
     enum class PassType {
         Compute,
         Graphics,
