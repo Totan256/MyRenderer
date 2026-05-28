@@ -12,8 +12,11 @@
 #include "RenderGraph.hpp"
 #include "rhi/UploadManager.hpp"
 namespace rhi::vk{
-    class ConstantBufferManager; // 前方宣言
-    class VulkanUploadManager; // 前方宣言
+    // 前方宣言
+    class ConstantBufferManager;
+    class VulkanUploadManager;
+    class VulkanShaderCache;
+    class VulkanPipelineCache;
 
     // エラーチェック用の簡易マクロ
     #define VK_CHECK(call) \
@@ -65,10 +68,9 @@ namespace rhi::vk{
         VkQueue getQueue(QueueType type) const;
         uint32_t getQueueFamilyIndex(QueueType type) const;
         
-        // セマフォの生成と破棄 (RenderGraph用)
-        // VkSemaphore createSemaphore();
-        // void destroySemaphore(VkSemaphore semaphore);
-
+        // キャッシュアクセス
+        VulkanShaderCache& getShaderCache();
+        VulkanPipelineCache& getPipelineCache();
         // Bindless用のセットとレイアウトを取得
         VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
         VkDescriptorSet getBindlessDescriptorSet() const { return m_bindlessDescriptorSet; }
@@ -141,5 +143,8 @@ namespace rhi::vk{
 
         std::mutex m_semaphoreMutex;
         std::vector<VkSemaphore> m_semaphorePool;
+
+        std::unique_ptr<VulkanShaderCache> m_shaderCache;
+        std::unique_ptr<VulkanPipelineCache> m_pipelineCache;
     };
 }

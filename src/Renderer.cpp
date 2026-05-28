@@ -60,9 +60,10 @@ void Renderer::render(float time) {
     // 3. Graphics Pass の構築 (描画先は Image)
     auto& pass = graph->addGraphicsPass("TestTrianglePass", "shaders/test.vert", "shaders/test.frag")
         .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0.1f, 0.1f, 0.0f})
-        .setTopology(rhi::Topology::TriangleList)
-        .setCullMode(rhi::CullMode::None)
-        .setDepthTest(false);
+        .setGraphicsState({
+            .cullMode = rhi::CullMode::None,
+            .depthTestEnable = false
+        });
 
     pass.draw(3, 1).read(vbIndex);
 

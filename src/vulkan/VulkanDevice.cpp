@@ -5,6 +5,7 @@
 #include "rhi/Resource.hpp"
 #include "RenderGraph.hpp"
 #include "VulkanRenderGraph.hpp"
+#include "VulkanCache.hpp"
 #include "VulkanConstantBufferManager.hpp"
 #include "VulkanCommandList.hpp"
 #include "VulkanResourceAllocator.hpp"
@@ -71,6 +72,13 @@ namespace rhi::vk{
     std::unique_ptr<rhi::CommandList> VulkanDevice::createCommandList(QueueType queueType) {
         return std::make_unique<VulkanCommandList>(*this, queueType);
     }
+    VulkanShaderCache& VulkanDevice::getShaderCache() { 
+        return *m_shaderCache; 
+    }
+    
+    VulkanPipelineCache& VulkanDevice::getPipelineCache() { 
+        return *m_pipelineCache; 
+    }
 
     void VulkanDevice::initialize(){
         std::cout << "--- Initializing VulkanDevice ---" << std::endl;
@@ -86,6 +94,8 @@ namespace rhi::vk{
         createLogicalDevice();
         createAllocator();
         createBindlessResources();
+        m_shaderCache = std::make_unique<VulkanShaderCache>();
+        m_pipelineCache = std::make_unique<VulkanPipelineCache>(*this);
 
         // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
         // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意またはconfigで指定できるようにする
@@ -346,6 +356,8 @@ namespace rhi::vk{
         // 2. マネージャ系の破棄（内部で保持しているCommandList等のフェンスもここで安全に破棄される）
         m_constantBufferManager.reset();
         m_uploadManager.reset();
+        m_pipelineCache.reset(); 
+        m_shaderCache.reset();
         // 3. 削除キューに溜まっている遅延破棄タスク(画像やバッファなど)をすべて強制実行してクリーンアップ
         for (auto& entry : m_deletionQueue) {
             entry.func();

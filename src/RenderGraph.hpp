@@ -53,6 +53,14 @@ namespace rhi {
     };
     
 
+    struct GraphicsState {
+        Topology topology = Topology::TriangleList;         //どうつなぐか
+        FrontFace frontFace = FrontFace::CounterClockwise;  // 頂点の順序のどちらを表とするか
+        CullMode cullMode = CullMode::Back;                 //どちらの面を描画しないか
+        bool depthTestEnable = true;                        // 手前にあるものが奥にあるものを隠す（Zテスト）
+        bool depthWriteEnable = true;                       //描画したオブジェクトの深度（Z値）を深度バッファに書き込むか
+        CompareOp depthCompareOp = CompareOp::Less;         //深度テストで「どういう条件なら描画するか」の判定
+    };
     // コマンド記録用のインターフェース
     class PassBuilder {
     public:
@@ -64,15 +72,11 @@ namespace rhi {
         virtual DispatchObject& dispatchThreads(uint32_t width, uint32_t height, uint32_t depth = 1) = 0;
         virtual PassBuilder& forceBatchBreak() = 0;
         // Graphics用メソッド
-        virtual PassBuilder& setDepthFormat(Format format) = 0;
-        virtual PassBuilder& setColorFormat(uint32_t attachmentIndex, Format format) = 0;
-        virtual PassBuilder& setCullMode(CullMode mode) = 0;
-        virtual PassBuilder& setDepthTest(bool enable, CompareOp op = CompareOp::Less) = 0;
-        virtual PassBuilder& setDepthWrite(bool enable) = 0;
+        virtual PassBuilder& setGraphicsState(const GraphicsState& state = {}) = 0;
         virtual PassBuilder& addColorOutput(uint32_t location, ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, ColorClearValue clearValue = {0,0,0,1}) = 0;
+        virtual PassBuilder& addColorOutput(StringHash nameHash, ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, ColorClearValue clearValue = {0,0,0,1}) = 0;
         virtual PassBuilder& setDepthOutput(ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, DepthClearValue clearValue = {1.0f, 0}) = 0;
-        virtual PassBuilder& setTopology(Topology topology) = 0;
-        virtual PassBuilder& setFrontFace(FrontFace face) = 0;
+        
         virtual DispatchObject& draw(uint32_t vertexCount, uint32_t instanceCount = 1) = 0;
         virtual DispatchObject& drawIndexedIndirectCount(ResourceHandle indirectBuffer, ResourceHandle countBuffer, uint32_t maxDrawCount) = 0;
 
@@ -80,7 +84,7 @@ namespace rhi {
     };
 
     struct ResourceRegistration {
-        StringHash nameHash = 0;
+        StringHash nameHash = {0};
 
         std::variant<ImageDesc, BufferDesc> desc;    // 作成用
         bool isImage() const {
@@ -120,10 +124,7 @@ namespace rhi {
         std::map<uint32_t, Format> colorFormats;
         Format depthFormat = Format::R8G8B8A8_Unorm; // プレースホルダ
         bool hasDepth = false;
-        CullMode cullMode = CullMode::Back;
-        bool depthTestEnable = true;
-        bool depthWriteEnable = true;
-        CompareOp depthCompareOp = CompareOp::Less;
+        GraphicsState graphicsState;
         
         struct DispatchState {
             uint32_t id;
@@ -155,6 +156,7 @@ namespace rhi {
         uint32_t localSizeY = 1;
         uint32_t localSizeZ = 1;
         std::map<StringHash, uint32_t> pushConstantOffsets;
+        std::map<StringHash, uint32_t> outputLocations; // Graphics用
         std::deque<DispatchState> dispatchStates;
 
         std::function<void(rhi::CommandList&)> callback; // Callback Pass用
@@ -174,8 +176,8 @@ namespace rhi {
         };
         std::vector<ColorAttachmentInfo> colorAttachments;
         std::optional<DepthAttachmentInfo> depthAttachment;
-        Topology topology = Topology::TriangleList;
-        FrontFace frontFace = FrontFace::CounterClockwise;
+        // Topology topology = Topology::TriangleList;
+        // FrontFace frontFace = FrontFace::CounterClockwise;
         
     };
 
@@ -185,9 +187,9 @@ namespace rhi {
         virtual ~RenderGraph() = default;
 
         // 外部の物理リソースを登録（スワップチェーンなど）
-        virtual ResourceHandle importResource(Resource* res, StringHash nameHash = 0) = 0;
-        virtual ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = 0) = 0;
-        virtual ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = 0) = 0;
+        virtual ResourceHandle importResource(Resource* res, StringHash nameHash = {0}) = 0;
+        virtual ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = {0}) = 0;
+        virtual ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = {0}) = 0;
         BindGroup& createBindGroup(const std::vector<ResourceRequirement>& bindings) {
             m_bindGroups.push_back(std::make_unique<BindGroup>(bindings));
             return *m_bindGroups.back();

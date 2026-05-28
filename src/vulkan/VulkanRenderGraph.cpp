@@ -8,6 +8,7 @@
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanConstantBufferManager.hpp"
 #include "ShaderReflection.hpp"
+#include "VulkanCache.hpp"
 #include <map>
 #include <queue>
 #include <vector>
@@ -132,38 +133,37 @@ namespace rhi::vk {
             return *this;
         }
 
-        PassBuilder& setDepthFormat(Format format) override {
-            m_node.depthFormat = format;
-            m_node.hasDepth = true;
+        PassBuilder& setGraphicsState(const rhi::GraphicsState& state) override {
+            m_node.graphicsState = state;
             return *this;
         }
-        PassBuilder& setColorFormat(uint32_t attachmentIndex, Format format) override {
-            m_node.colorFormats[attachmentIndex] = format;
-            return *this;
-        }
-        PassBuilder& setCullMode(CullMode mode) override { m_node.cullMode = mode; return *this; }
-        PassBuilder& setDepthTest(bool enable, CompareOp op) override { m_node.depthTestEnable = enable; m_node.depthCompareOp = op; return *this; }
-        PassBuilder& setDepthWrite(bool enable) override { m_node.depthWriteEnable = enable; return *this; }
         PassBuilder& addColorOutput(uint32_t location, ResourceHandle handle, LoadOp loadOp, StoreOp storeOp, ColorClearValue clearValue) override {
             m_node.colorAttachments.push_back({location, handle, loadOp, storeOp, clearValue});
-            // バリア解決のために自動で要件として登録する
             m_node.resourceHandles.push_back(handle);
-            // location がオフセットと衝突しないよう、適当なハッシュやダミー値をオフセットにする
             m_node.requirements.push_back({0x10000 + location, rhi::ResourceState::ColorAttachment, rhi::ShaderStage::Fragment});
+            const auto& reg = m_graph.getRegistration(handle);
+            if (reg.isImported && reg.physicalResource && reg.physicalResource->isImage()) {
+                m_node.colorFormats[location] = static_cast<VulkanImage*>(reg.physicalResource)->getDesc().format;
+            } else if (std::holds_alternative<rhi::ImageDesc>(reg.desc)) {
+                m_node.colorFormats[location] = std::get<rhi::ImageDesc>(reg.desc).format;
+            }
             return *this;
+        }
+        PassBuilder& addColorOutput(StringHash nameHash, ResourceHandle handle, LoadOp loadOp, StoreOp storeOp, ColorClearValue clearValue) override {
+            uint32_t location = m_node.outputLocations[nameHash];
+            return addColorOutput(location, handle, loadOp, storeOp, clearValue);
         }
         PassBuilder& setDepthOutput(ResourceHandle handle, LoadOp loadOp, StoreOp storeOp, DepthClearValue clearValue) override {
             m_node.depthAttachment = {handle, loadOp, storeOp, clearValue};
             m_node.resourceHandles.push_back(handle);
             m_node.requirements.push_back({0x20000, rhi::ResourceState::DepthStencilWrite, rhi::ShaderStage::Fragment});
-            return *this;
-        }
-        PassBuilder& setTopology(Topology topology) override {
-            m_node.topology = topology;
-            return *this;
-        }
-        PassBuilder& setFrontFace(FrontFace face) override {
-            m_node.frontFace = face;
+            m_node.hasDepth = true;
+            const auto& reg = m_graph.getRegistration(handle);
+            if (reg.isImported && reg.physicalResource && reg.physicalResource->isImage()) {
+                m_node.depthFormat = static_cast<VulkanImage*>(reg.physicalResource)->getDesc().format;
+            } else if (std::holds_alternative<rhi::ImageDesc>(reg.desc)) {
+                m_node.depthFormat = std::get<rhi::ImageDesc>(reg.desc).format;
+            }
             return *this;
         }
         DispatchObject& draw(uint32_t vertexCount, uint32_t instanceCount) override {
@@ -212,22 +212,17 @@ namespace rhi::vk {
         node.name = name;
         node.shaderPath = shaderPath;
 
-        // リフレクション実行
-        if (shaderPath.ends_with(".comp")) { // TODO: SPV対応
-            auto spirv = VulkanComputePipeline::compileGLSLToSPIRV(shaderPath);
-            std::cout << "Compiled shader to SPIR-V: " << shaderPath << " (size: " << spirv.size() * sizeof(uint32_t) << " bytes)" << std::endl;
-            auto reflection = ShaderReflection::reflect(spirv);
+        if (shaderPath.ends_with(".comp")) { 
+            // Deviceのキャッシュからリフレクション情報を取得
+            const auto& shaderData = m_device.getShaderCache().getOrCreateShader(shaderPath, shaderc_compute_shader);
             
-            node.type = reflection.passType;
-            node.queueType = queueType; // 引数優先
-            node.localSizeX = reflection.localSizeX;
-            node.localSizeY = reflection.localSizeY;
-            node.localSizeZ = reflection.localSizeZ;
-            node.pushConstantOffsets = reflection.pushConstantOffsets;
-            std::cout << "Reflected shader: " << shaderPath << " (localSize: " << node.localSizeX << "," << node.localSizeY << "," << node.localSizeZ << ")" << std::endl;
-
+            node.type = shaderData.reflection.passType;
+            node.queueType = queueType; 
+            node.localSizeX = shaderData.reflection.localSizeX;
+            node.localSizeY = shaderData.reflection.localSizeY;
+            node.localSizeZ = shaderData.reflection.localSizeZ;
+            node.pushConstantOffsets = shaderData.reflection.pushConstantOffsets;
         }
-
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
     }
@@ -296,16 +291,12 @@ namespace rhi::vk {
         node.vertShaderPath = vertShaderPath;
         node.fragShaderPath = fragShaderPath;
 
-        auto vertSpv = VulkanComputePipeline::compileGLSLToSPIRV(vertShaderPath, shaderc_vertex_shader);
-        auto fragSpv = VulkanComputePipeline::compileGLSLToSPIRV(fragShaderPath, shaderc_fragment_shader);
+        // Deviceのキャッシュから頂点/フラグメント双方のリフレクション情報を取得
+        const auto& vertData = m_device.getShaderCache().getOrCreateShader(vertShaderPath, shaderc_vertex_shader);
+        const auto& fragData = m_device.getShaderCache().getOrCreateShader(fragShaderPath, shaderc_fragment_shader);
         
-        auto vertReflect = ShaderReflection::reflect(vertSpv);
-        auto fragReflect = ShaderReflection::reflect(fragSpv);
-
-        node.pushConstantOffsets = vertReflect.pushConstantOffsets;
-        for (const auto& [hash, offset] : fragReflect.pushConstantOffsets) {
-            node.pushConstantOffsets[hash] = offset;
-        }
+        node.pushConstantOffsets = vertData.reflection.pushConstantOffsets;
+        node.outputLocations = fragData.reflection.outputLocations; // フラグメントの出力位置情報をパスに保存
 
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
@@ -389,35 +380,28 @@ namespace rhi::vk {
                 ds.y = up.stagingOffset;
             }
         }
+        m_physicalNodes.resize(m_logicalNodes.size());
 
         // 1. 各パスの要件（requirements）をディスパッチから遅延集計する
         for (size_t passIndex = 0; passIndex < m_logicalNodes.size(); ++passIndex) {
             auto& node = m_logicalNodes[passIndex];
-            
-            // Compute Pipeline 生成
-            if (node.type == PassType::Compute && !node.shaderPath.empty() && m_pipelines.find(node.shaderPath) == m_pipelines.end()) {
-                m_pipelines[node.shaderPath] = std::make_unique<VulkanComputePipeline>(m_device, node.shaderPath, MAX_PUSH_CONSTANT_SIZE);
+            auto& physNode = m_physicalNodes[passIndex];
+            // --- パイプラインの遅延解決 ---
+            if (node.type == PassType::Compute && !node.shaderPath.empty()) {
+                physNode.computePipeline = m_device.getPipelineCache().getOrCreateComputePipeline(node.shaderPath, MAX_PUSH_CONSTANT_SIZE);
             }
-            // Graphics Pipeline 生成
             else if (node.type == PassType::Graphics) {
-                std::string pipeKey = node.vertShaderPath + "|" + node.fragShaderPath;
-                if (m_graphicsPipelines.find(pipeKey) == m_graphicsPipelines.end()) {
-                    
-                    std::vector<VkFormat> vkColorFormats;
-                    for (auto const& [idx, fmt] : node.colorFormats) {
-                        vkColorFormats.push_back(mapFormat(fmt));
-                    }
-                    VkFormat vkDepthFormat = node.hasDepth ? mapFormat(node.depthFormat) : VK_FORMAT_UNDEFINED;
-
-                    // 今回作成した VulkanGraphicsPipeline を使用
-                    m_graphicsPipelines[pipeKey] = std::make_unique<VulkanGraphicsPipeline>(
-                        m_device, node.vertShaderPath, node.fragShaderPath, vkColorFormats, vkDepthFormat, MAX_PUSH_CONSTANT_SIZE);
+                std::vector<VkFormat> vkColorFormats;
+                for (auto const& [idx, fmt] : node.colorFormats) {
+                    vkColorFormats.push_back(mapFormat(fmt));
                 }
-            }else if (node.type == PassType::GenerateMipmaps) {
-                
+                VkFormat vkDepthFormat = node.hasDepth ? mapFormat(node.depthFormat) : VK_FORMAT_UNDEFINED;
+
+                // フォーマットを含めてパイプラインを要求
+                physNode.graphicsPipeline = m_device.getPipelineCache().getOrCreateGraphicsPipeline(
+                    node.vertShaderPath, node.fragShaderPath, vkColorFormats, vkDepthFormat, MAX_PUSH_CONSTANT_SIZE);
             }
-            // node.resourceHandles.clear();
-            // node.requirements.clear();
+            // リソースハンドル集計
             std::set<ResourceHandle> seenHandles;
             for (auto handle : node.resourceHandles) {
                 seenHandles.insert(handle);
@@ -438,7 +422,6 @@ namespace rhi::vk {
             }
         }
         std::cout << "RenderGraph requirements collected." << std::endl;//debug
-        m_physicalNodes.resize(m_logicalNodes.size());
         std::vector<uint32_t> passIndices(m_logicalNodes.size());
         std::iota(passIndices.begin(), passIndices.end(), 0);
         std::cout << "Sorting passes..." << std::endl;//debug
@@ -686,9 +669,8 @@ namespace rhi::vk {
                 }
                 else if (logicalNode.type == PassType::Compute) {
                     if (!logicalNode.shaderPath.empty()) {
-                        auto* pipeline = m_pipelines[logicalNode.shaderPath].get();
-                        if (pipeline) {
-                            batch.cmdList->bindPipeline(*pipeline);
+                        if (physiaclNode.computePipeline) {
+                            batch.cmdList->bindPipeline(*physiaclNode.computePipeline);
                             batch.cmdList->bindGlobalDescriptorSet();
                         }
                     }
@@ -725,7 +707,7 @@ namespace rhi::vk {
                     }
                 }else if (logicalNode.type == PassType::Graphics) {
                     std::string pipeKey = logicalNode.vertShaderPath + "|" + logicalNode.fragShaderPath;
-                    auto* pipeline = m_graphicsPipelines[pipeKey].get();
+                    auto* pipeline = physiaclNode.graphicsPipeline;
                     auto* vkCmd = static_cast<VulkanCommandList*>(batch.cmdList.get());
                     VkCommandBuffer cmdBuf = vkCmd->getCommandBuffer();
 
@@ -786,12 +768,12 @@ namespace rhi::vk {
                         VkDescriptorSet globalSet = m_device.getBindlessDescriptorSet();
                         vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->getPipelineLayout(), 0, 1, &globalSet, 0, nullptr);
                         // Dynamic State の適用
-                        vkCmd->setTopology(mapTopology(logicalNode.topology));
-                        vkCmd->setCullMode(mapCullMode(logicalNode.cullMode));
-                        vkCmd->setFrontFace(mapFrontFace(logicalNode.frontFace));
-                        vkCmd->setDepthTestEnable(logicalNode.depthTestEnable);
-                        vkCmd->setDepthWriteEnable(logicalNode.depthWriteEnable);
-                        vkCmd->setDepthCompareOp(mapCompareOp(logicalNode.depthCompareOp));
+                        vkCmd->setTopology(mapTopology(logicalNode.graphicsState.topology));
+                        vkCmd->setCullMode(mapCullMode(logicalNode.graphicsState.cullMode));
+                        vkCmd->setFrontFace(mapFrontFace(logicalNode.graphicsState.frontFace));
+                        vkCmd->setDepthTestEnable(logicalNode.graphicsState.depthTestEnable);
+                        vkCmd->setDepthWriteEnable(logicalNode.graphicsState.depthWriteEnable);
+                        vkCmd->setDepthCompareOp(mapCompareOp(logicalNode.graphicsState.depthCompareOp));
                         // Drawの発行
                         for (auto& state : logicalNode.dispatchStates) {
                             // todo Computeと同じ処理を共通化

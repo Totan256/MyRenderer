@@ -13,6 +13,7 @@ namespace rhi::vk {
         uint32_t localSizeY = 1;
         uint32_t localSizeZ = 1;
         std::map<StringHash, uint32_t> pushConstantOffsets;
+        std::map<StringHash, uint32_t> outputLocations;
     };
 
     class ShaderReflection {

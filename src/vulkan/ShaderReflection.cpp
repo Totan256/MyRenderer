@@ -34,6 +34,10 @@ namespace rhi::vk {
                 }
             }
         }
+        for (const auto& resource : resources.stage_outputs) {
+            uint32_t location = compiler.get_decoration(resource.id, spv::DecorationLocation);
+            data.outputLocations[hashString(resource.name.c_str())] = location;
+        }
         return data;
     }
 }

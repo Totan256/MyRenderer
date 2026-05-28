@@ -17,6 +17,8 @@ namespace rhi::vk {
     struct PhysicalNode{
         std::vector<VkImageMemoryBarrier2> imageBarriers;
         std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+        VulkanComputePipeline* computePipeline = nullptr;
+        VulkanGraphicsPipeline* graphicsPipeline = nullptr;
     };
 
     struct RenderBatch {
@@ -36,9 +38,9 @@ namespace rhi::vk {
 
         PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;
         PassBuilder& addGraphicsPass(const std::string& name, const std::string& vertShaderPath, const std::string& fragShaderPath) override;
-        ResourceHandle importResource(Resource* res, StringHash nameHash = 0) override;
-        ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = 0) override;
-        ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = 0) override;
+        ResourceHandle importResource(Resource* res, StringHash nameHash = {0}) override;
+        ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = {0}) override;
+        ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = {0}) override;
         uint32_t getPhysicalIndex(ResourceHandle handle) override;
         const ResourceRegistration& getRegistration(ResourceHandle handle) const { return m_resourceRegistry[handle];}
 
@@ -54,8 +56,6 @@ namespace rhi::vk {
         std::vector<PhysicalNode> m_physicalNodes;
         std::vector<std::unique_ptr<PassBuilder>> m_builders;
         std::vector<std::unique_ptr<DispatchObject>> m_dispatchObjects;
-        std::map<std::string, std::unique_ptr<VulkanComputePipeline>> m_pipelines;
-        std::map<std::string, std::unique_ptr<VulkanGraphicsPipeline>> m_graphicsPipelines;
         VulkanResourceAllocator m_resourceAllocator;
         VulkanDevice& m_device;
         std::vector<uint32_t> m_sortedIndices;
