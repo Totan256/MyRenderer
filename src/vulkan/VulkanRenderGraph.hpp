@@ -32,9 +32,7 @@ namespace rhi::vk {
     public:
         VulkanRenderGraph(VulkanDevice& device): m_device(device), m_resourceAllocator(device){
         }
-        ~VulkanRenderGraph() {
-            clearBatchSemaphores();
-        }
+        ~VulkanRenderGraph() override;
 
         PassBuilder& addPass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;
         PassBuilder& addGraphicsPass(const std::string& name, const std::string& vertShaderPath, const std::string& fragShaderPath) override;
@@ -67,12 +65,7 @@ namespace rhi::vk {
         std::vector<RenderBatch> m_batches;
         std::vector<VkSemaphore> m_batchSemaphores;
 
-        void clearBatchSemaphores() {
-            for (VkSemaphore sem : m_batchSemaphores) {
-                m_device.destroySemaphore(sem);
-            }
-            m_batchSemaphores.clear();
-        }
+        void clearBatchSemaphores();
     };
     
 }

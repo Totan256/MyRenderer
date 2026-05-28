@@ -180,6 +180,19 @@ namespace rhi::vk {
         LogicalPass& m_node;
     };
 
+    VulkanRenderGraph::~VulkanRenderGraph() {
+        clearBatchSemaphores();
+    }
+    void VulkanRenderGraph::clearBatchSemaphores() {
+        for (VkSemaphore sem : m_batchSemaphores) {
+            if (sem != VK_NULL_HANDLE) {
+                m_device.enqueueDeletion([device = &m_device, s = sem]() {
+                    device->releaseSemaphore(s);
+                });
+            }
+        }
+        m_batchSemaphores.clear();
+    }
     DispatchObject& VulkanRenderGraph::createDispatch(LogicalPass& node, uint32_t x, uint32_t y, uint32_t z) {
         if (node.dispatchStates.empty()) {
             node.dispatchStates.push_back({});
@@ -297,6 +310,13 @@ namespace rhi::vk {
         m_builders.push_back(std::make_unique<VulkanPassBuilder>(*this, node));
         return *m_builders.back();
     }
+
+    auto getAspectMask = [](rhi::Format format) -> VkImageAspectFlags {
+        if (format == rhi::Format::D32_Sfloat || format == rhi::Format::D24_Unorm) {
+            return VK_IMAGE_ASPECT_DEPTH_BIT;
+        }
+        return VK_IMAGE_ASPECT_COLOR_BIT;
+    };
 
     void VulkanRenderGraph::compile() {
         std::cout << "Compiling RenderGraph..." << std::endl;//debug
@@ -450,7 +470,8 @@ namespace rhi::vk {
                     if (prevQueueFamily != currentQueueFamily) {
                         // キューファミリーが異なるため、所有権移行（Ownership Transfer）を生成
                         if (m_resourceRegistry[h].isImage()) {
-                            VkImage img = m_resourceAllocator.getPhysicalImage(h)->getImage();
+                            VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(h);
+                            VkImage img = physImg->getImage();
                             // 移行元キュー（前回のパス）に Release バリアを挿入
                             VkImageMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                             releaseBarrier.srcStageMask        = prevTrack.state.stageMask;
@@ -462,7 +483,7 @@ namespace rhi::vk {
                             releaseBarrier.srcQueueFamilyIndex = prevQueueFamily;
                             releaseBarrier.dstQueueFamilyIndex = currentQueueFamily;
                             releaseBarrier.image               = img;
-                            releaseBarrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                            releaseBarrier.subresourceRange    = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
                             m_physicalNodes[prevTrack.lastPassIdx].imageBarriers.push_back(releaseBarrier);
                             // 移行先キュー（現在のパス）に Acquire バリアを挿入
                             VkImageMemoryBarrier2 acquireBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
@@ -475,7 +496,7 @@ namespace rhi::vk {
                             acquireBarrier.srcQueueFamilyIndex = prevQueueFamily;
                             acquireBarrier.dstQueueFamilyIndex = currentQueueFamily;
                             acquireBarrier.image               = img;
-                            acquireBarrier.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                            acquireBarrier.subresourceRange    = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
                             physiaclNode.imageBarriers.push_back(acquireBarrier);
                             // Acquire 後にレイアウト遷移が必要な場合、現在のキューで追加のバリアを発行
                             if (prevTrack.state.layout != next.layout) {
@@ -489,7 +510,7 @@ namespace rhi::vk {
                                 layoutBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 layoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 layoutBarrier.image         = img;
-                                layoutBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                                layoutBarrier.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
                                 physiaclNode.imageBarriers.push_back(layoutBarrier);
                             }
                         } else {
@@ -525,12 +546,13 @@ namespace rhi::vk {
                         // 同一キュー内での通常のパイプラインバリアおよびレイアウト遷移
                         if (prevTrack.state.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
                             if (m_resourceRegistry[h].isImage()) {
+                                auto physImg = m_resourceAllocator.getPhysicalImage(h);
                                 VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                                 imgBarrier.srcStageMask  = prevTrack.state.stageMask; imgBarrier.srcAccessMask = prevTrack.state.accessMask;
                                 imgBarrier.dstStageMask  = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                                 imgBarrier.oldLayout     = prevTrack.state.layout;    imgBarrier.newLayout     = next.layout;
-                                imgBarrier.image         = m_resourceAllocator.getPhysicalImage(h)->getImage();
-                                imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                                imgBarrier.image         = physImg->getImage();
+                                imgBarrier.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
                                 physiaclNode.imageBarriers.push_back(imgBarrier);
                             } else {
                                 VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
@@ -588,7 +610,7 @@ namespace rhi::vk {
                 // バッチを跨ぐ場合、セマフォを生成して前後のバッチを繋ぐ
                 if (m_batches.size() > 1) {
                     RenderBatch& prevBatch = m_batches[m_batches.size() - 2];
-                    VkSemaphore sem = m_device.createSemaphore();
+                    VkSemaphore sem = m_device.requestSemaphore();
                     m_batchSemaphores.push_back(sem);
                     prevBatch.signalSemaphores.push_back(sem);
                     currentBatch->waitSemaphores.push_back(sem);

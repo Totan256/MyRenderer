@@ -50,7 +50,9 @@ namespace rhi {
         R8G8B8A8_Unorm,
         R16G16B16A16_Unorm,
         R32G32B32A32_Sfloat,
-        // ... 
+        D32_Sfloat,
+        D24_Unorm,
+
     };
 
     struct BufferDesc {

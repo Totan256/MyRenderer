@@ -18,7 +18,7 @@ namespace rhi::vk {
         m_asyncState.ringMappedPtr = static_cast<uint8_t*>(m_asyncState.ringBuffer->map());
         m_asyncState.cmdList = std::make_unique<VulkanCommandList>(m_device, QueueType::Transfer);
         
-        m_asyncState.syncSemaphore = m_device.createSemaphore();
+        m_asyncState.syncSemaphore = m_device.requestSemaphore();
         VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         vkCreateFence(m_device.getDevice(), &fenceInfo, nullptr, &m_asyncState.syncFence);
@@ -41,7 +41,7 @@ namespace rhi::vk {
 
     VulkanUploadManager::~VulkanUploadManager() {
         ensureAsyncReady();
-        m_device.destroySemaphore(m_asyncState.syncSemaphore);
+        m_device.releaseSemaphore(m_asyncState.syncSemaphore);
         vkDestroyFence(m_device.getDevice(), m_asyncState.syncFence, nullptr);
     }
 

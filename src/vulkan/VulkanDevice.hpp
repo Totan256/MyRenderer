@@ -47,6 +47,9 @@ namespace rhi::vk{
         // 削除キュー
         void enqueueDeletion(std::function<void()>&& deletionFunc) override;
 
+        VkSemaphore requestSemaphore();
+        void releaseSemaphore(VkSemaphore semaphore);
+
         std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) override;
         std::unique_ptr<Image> createImage(const ImageDesc& desc) override;
         std::unique_ptr<RenderGraph> createRenderGraph() override;
@@ -63,8 +66,8 @@ namespace rhi::vk{
         uint32_t getQueueFamilyIndex(QueueType type) const;
         
         // セマフォの生成と破棄 (RenderGraph用)
-        VkSemaphore createSemaphore();
-        void destroySemaphore(VkSemaphore semaphore);
+        // VkSemaphore createSemaphore();
+        // void destroySemaphore(VkSemaphore semaphore);
 
         // Bindless用のセットとレイアウトを取得
         VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
@@ -135,5 +138,8 @@ namespace rhi::vk{
         uint32_t allocateIndex();
 
         std::optional<uint32_t> findComputeQueueFamilyIndex(VkPhysicalDevice device);
+
+        std::mutex m_semaphoreMutex;
+        std::vector<VkSemaphore> m_semaphorePool;
     };
 }

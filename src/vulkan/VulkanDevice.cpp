@@ -10,6 +10,8 @@
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanUploadManager.hpp"
 #include <iostream>
+#include <set>
+#include <vector>
 
 
 #define VMA_IMPLEMENTATION
@@ -154,9 +156,7 @@ namespace rhi::vk{
 
         for (uint32_t i = 0; i < queueFamilyCount; ++i) {
             // VK_QUEUE_COMPUTE_BITが含まれ、VK_QUEUE_GRAPHICS_BITが含まれないもの（または両方含むもの）を探す
-            if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT) {
-                // 今回はComputeビットが立っているものを見つけたら採用
-                // Todo 後で見直し
+            if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT && !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 return i;
             }
         }
@@ -217,13 +217,23 @@ namespace rhi::vk{
     }
 
     void VulkanDevice::createLogicalDevice(){
-        // キュー作成情報の定義（Compute Queue用）
-        float queuePriority = 1.0f; // キューの優先度
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = m_computeQueueFamilyIndex;
-        queueCreateInfo.queueCount = 1; // キューを1つ作成
-        queueCreateInfo.pQueuePriorities = &queuePriority;
+        // キュー作成情報の定義
+        std::set<uint32_t> uniqueQueueFamilies = {
+            m_computeQueueFamilyIndex,
+            m_graphicsQueueFamilyIndex
+        };
+
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        float queuePriority = 1.0f;
+
+        for (uint32_t queueFamily : uniqueQueueFamilies) {
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = queueFamily;
+            queueCreateInfo.queueCount = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
 
         // Synchronization2 機能を有効化
         VkPhysicalDeviceSynchronization2Features sync2Features{};
@@ -275,8 +285,8 @@ namespace rhi::vk{
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         createInfo.pNext = &indexingFeatures;
-        createInfo.pQueueCreateInfos = &queueCreateInfo;
-        createInfo.queueCreateInfoCount = 1;
+        createInfo.pQueueCreateInfos = queueCreateInfos.data();
+        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
         createInfo.pEnabledFeatures = &deviceFeatures;
         
         // ToDo: 有効化するデバイス拡張機能
@@ -348,6 +358,11 @@ namespace rhi::vk{
             }
         }
         m_inFlightFences.clear();
+
+        for (VkSemaphore sem : m_semaphorePool) {
+            vkDestroySemaphore(m_device, sem, nullptr);
+        }
+        m_semaphorePool.clear();
         // 5. Vulkanコアオブジェクトの破棄
         if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
         if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
@@ -580,7 +595,17 @@ namespace rhi::vk{
         return m_computeQueueFamilyIndex;
     }
 
-    VkSemaphore VulkanDevice::createSemaphore() {
+    VkSemaphore VulkanDevice::requestSemaphore() {
+        std::lock_guard<std::mutex> lock(m_semaphoreMutex);
+        
+        // プールに空きがあれば再利用
+        if (!m_semaphorePool.empty()) {
+            VkSemaphore sem = m_semaphorePool.back();
+            m_semaphorePool.pop_back();
+            return sem;
+        }
+
+        // プールが空なら新規作成
         VkSemaphoreCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         VkSemaphore sem;
@@ -610,9 +635,10 @@ namespace rhi::vk{
         // TODO: 同様に LinearClamp, NearestClamp などを作成
     }
 
-    void VulkanDevice::destroySemaphore(VkSemaphore semaphore) {
-        if (semaphore != VK_NULL_HANDLE) {
-            vkDestroySemaphore(m_device, semaphore, nullptr);
-        }
+    void VulkanDevice::releaseSemaphore(VkSemaphore semaphore) {
+        if (semaphore == VK_NULL_HANDLE) return;
+        
+        std::lock_guard<std::mutex> lock(m_semaphoreMutex);
+        m_semaphorePool.push_back(semaphore); // プールに返却して次回以降使い回す
     }
 }

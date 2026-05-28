@@ -49,8 +49,6 @@ namespace rhi::vk {
 
         // RenderGraph実行時に未回収のセマフォを全て回収する
         std::vector<SemaphoreHandle> consumeAsyncSemaphores() override;
-
-
         
         std::vector<UploadRequest> getAndClearPendingUploads() override;
         std::vector<rhi::ImageUploadRequest> getAndClearPendingImageUploads() override;
