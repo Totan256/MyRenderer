@@ -7,42 +7,24 @@
 
 namespace rhi::vk {
     VulkanUploadManager::VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize)
-        : m_device(device), m_framesInFlight(framesInFlight) {
-        
-        m_asyncState.ringBufferSize = ringBufferSize;
-        m_asyncState.ringBuffer = std::make_unique<VulkanBuffer>(
-            m_device, m_device.getAllocator(), ringBufferSize,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            VMA_MEMORY_USAGE_CPU_TO_GPU
-        );
-        m_asyncState.ringMappedPtr = static_cast<uint8_t*>(m_asyncState.ringBuffer->map());
-        m_asyncState.cmdList = std::make_unique<VulkanCommandList>(m_device, QueueType::Transfer);
-        
-        m_asyncState.syncSemaphore = m_device.requestSemaphore();
-        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        vkCreateFence(m_device.getDevice(), &fenceInfo, nullptr, &m_asyncState.syncFence);
-
-        m_asyncState.cmdList->reset();
-        m_asyncState.cmdList->begin();
-
+        : m_device(device), m_framesInFlight(framesInFlight) {m_frameSemaphoresToRelease.resize(m_framesInFlight);
         m_frameStates.resize(m_framesInFlight);
         for (uint32_t i = 0; i < m_framesInFlight; ++i) {
-            auto& state = m_frameStates[i];
-            state.ringBufferSize = ringBufferSize;
-            state.ringBuffer = std::make_unique<VulkanBuffer>(
-                m_device, m_device.getAllocator(), ringBufferSize,
-                VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VMA_MEMORY_USAGE_CPU_TO_GPU
-            );
-            state.ringMappedPtr = static_cast<uint8_t*>(state.ringBuffer->map());
+            m_frameStates[i].ringBufferSize = ringBufferSize;
+            resetRingBufferState(m_frameStates[i], getOrCreateRingBuffer(ringBufferSize));
         }
     }
 
     VulkanUploadManager::~VulkanUploadManager() {
-        ensureAsyncReady();
-        m_device.releaseSemaphore(m_asyncState.syncSemaphore);
-        vkDestroyFence(m_device.getDevice(), m_asyncState.syncFence, nullptr);
+        retireCompletedAsyncContexts(true);
+        for (auto& ctx : m_asyncContextPool) {
+            if (ctx->syncFence != VK_NULL_HANDLE) {
+                vkDestroyFence(m_device.getDevice(), ctx->syncFence, nullptr);
+            }
+        }
+        for (auto& sems : m_frameSemaphoresToRelease) {
+            for (VkSemaphore sem : sems) m_device.releaseSemaphore(sem);
+        }
     }
 
     StagingAllocation VulkanUploadManager::allocateStagingSpace(UploadState& state, size_t size, size_t alignment) {
@@ -65,20 +47,54 @@ namespace rhi::vk {
         state.ringBufferOffset = allocOffset + size;
         return { state.ringBuffer.get(), allocOffset, ptr, false };
     }
+    AsyncUploadContext* VulkanUploadManager::getOrCreateAsyncContext() {
+        for (auto& ctx : m_asyncContextPool) {
+            if (std::find(m_activeAsyncContexts.begin(), m_activeAsyncContexts.end(), ctx.get()) == m_activeAsyncContexts.end()) {
+                return ctx.get();
+            }
+        }
+        auto ctx = std::make_unique<AsyncUploadContext>();
+        ctx->cmdList = std::make_unique<VulkanCommandList>(m_device, QueueType::Transfer);
+        
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        vkCreateFence(m_device.getDevice(), &fenceInfo, nullptr, &ctx->syncFence);
+        
+        m_asyncContextPool.push_back(std::move(ctx));
+        return m_asyncContextPool.back().get();
+    }
 
-    void VulkanUploadManager::ensureAsyncReady() {
-        if (m_asyncState.isSubmitted) {
-            vkWaitForFences(m_device.getDevice(), 1, &m_asyncState.syncFence, VK_TRUE, UINT64_MAX);
-            vkResetFences(m_device.getDevice(), 1, &m_asyncState.syncFence);
-            m_asyncState.pendingTemporaryBuffers.clear();
-            m_asyncState.ringBufferOffset = 0;
-            m_asyncState.cmdList->reset();
-            m_asyncState.cmdList->begin();
-            m_asyncState.isSubmitted = false;
+    void VulkanUploadManager::retireCompletedAsyncContexts(bool waitAll) {
+        auto it = m_activeAsyncContexts.begin();
+        while (it != m_activeAsyncContexts.end()) {
+            AsyncUploadContext* ctx = *it;
+            VkResult status = vkGetFenceStatus(m_device.getDevice(), ctx->syncFence);
+            
+            if (waitAll || status == VK_SUCCESS) {
+                if (waitAll && status != VK_SUCCESS) {
+                    vkWaitForFences(m_device.getDevice(), 1, &ctx->syncFence, VK_TRUE, UINT64_MAX);
+                }
+                vkResetFences(m_device.getDevice(), 1, &ctx->syncFence);
+                
+                // 【変更】使い終わったリングバッファを破棄せずプールに戻す
+                if (ctx->retainedRingBuffer) {
+                    m_freeRingBuffers.push_back(std::move(ctx->retainedRingBuffer));
+                }
+                ctx->retainedBuffers.clear();
+                
+                it = m_activeAsyncContexts.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
+
     void VulkanUploadManager::beginFrame(uint64_t currentFrameIndex) {
         m_currentFrameIndex = currentFrameIndex % m_framesInFlight;
+        for (VkSemaphore sem : m_frameSemaphoresToRelease[m_currentFrameIndex]) {
+            m_device.releaseSemaphore(sem);
+        }
+        m_frameSemaphoresToRelease[m_currentFrameIndex].clear();
         auto& state = m_frameStates[m_currentFrameIndex];
         state.pendingTemporaryBuffers.clear();
         state.ringBufferOffset = 0;
@@ -116,24 +132,25 @@ namespace rhi::vk {
 
     rhi::SemaphoreHandle VulkanUploadManager::submitUploadsAsync() {
         auto& state = m_frameStates[m_currentFrameIndex];
-        
-        // 溜まったリクエストがない場合は何もしない
-        if (state.pendingUploads.empty() && state.pendingImageUploads.empty()) {
-            return nullptr;
-        }
+        if (state.pendingUploads.empty() && state.pendingImageUploads.empty()) return nullptr;
 
-        ensureAsyncReady();
-        
-        // stateに溜まったリクエストを m_asyncState の cmdList に記録する処理
+        retireCompletedAsyncContexts(false);
+        AsyncUploadContext* ctx = getOrCreateAsyncContext();
+        m_activeAsyncContexts.push_back(ctx);
+        vkResetFences(m_device.getDevice(), 1, &ctx->syncFence);
+        ctx->cmdList->reset();
+        ctx->cmdList->begin();
+
+        // コマンドの記録 (現状の処理と同じ)
         for (const auto& up : state.pendingUploads) {
-            m_asyncState.cmdList->copyBuffer(up.stagingBuffer, up.dstBuffer, up.size, up.stagingOffset, 0);
+            ctx->cmdList->copyBuffer(up.stagingBuffer, up.dstBuffer, up.size, up.stagingOffset, 0);
         }
+        VkCommandBuffer cmd = ctx->cmdList->getCommandBuffer();
+        std::vector<VkImageMemoryBarrier> initialBarriers;
+        initialBarriers.reserve(state.pendingImageUploads.size());
+        // レイアウト遷移バリアを先に記録しておく（全てのアップロードで共通なので一括で）
         for (const auto& up : state.pendingImageUploads) {
             VulkanImage* physDstImg = static_cast<VulkanImage*>(up.dstImage);
-            VulkanBuffer* physSrcBuf = static_cast<VulkanBuffer*>(up.stagingBuffer);
-            
-            // Image用のバリアとコピーコマンド（以前の uploadImageFromFile 内のコマンド発行部を移植）
-            VkCommandBuffer cmd = m_asyncState.cmdList->getCommandBuffer();
             
             VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
             barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -142,8 +159,19 @@ namespace rhi::vk {
             barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, up.mipLevels, 0, 1 };
             barrier.srcAccessMask = 0;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+            
+            initialBarriers.push_back(barrier);
+        }
+        if (!initialBarriers.empty()) {
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 
+                                0, nullptr, 0, nullptr, (uint32_t)initialBarriers.size(), initialBarriers.data());
+        }
 
+        // コピーとミップマップ生成を記録
+        for (const auto& up : state.pendingImageUploads) {
+            VulkanImage* physDstImg = static_cast<VulkanImage*>(up.dstImage);
+            VulkanBuffer* physSrcBuf = static_cast<VulkanBuffer*>(up.stagingBuffer);
+            
             VkBufferImageCopy region{};
             region.bufferOffset = up.stagingOffset;
             region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
@@ -152,30 +180,39 @@ namespace rhi::vk {
             
             physDstImg->recordMipmapGenerationCmds(cmd);
         }
+        ctx->cmdList->end();
 
-        m_asyncState.cmdList->end();
-        vkResetFences(m_device.getDevice(), 1, &m_asyncState.syncFence);
+        // バッファ所有権の退避
+        ctx->retainedRingBuffer = std::move(state.ringBuffer);
+        for(auto& tempBuf : state.pendingTemporaryBuffers){
+            ctx->retainedBuffers.push_back(std::move(tempBuf));
+        }
+        state.pendingTemporaryBuffers.clear();
         
+        // プールから新しいリングバッファを取得して補充 (DRY化)
+        resetRingBufferState(state, getOrCreateRingBuffer(state.ringBufferSize));
+        // セマフォはSubmitのたびに新規取得し、フレーム単位のリストでライフサイクル管理する
+        VkSemaphore syncSemaphore = m_device.requestSemaphore();
+        m_frameSemaphoresToRelease[m_currentFrameIndex].push_back(syncSemaphore);
+        m_pendingAsyncSemaphores.push_back(syncSemaphore);
+
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
-        VkCommandBuffer cmdBuf = m_asyncState.cmdList->getCommandBuffer();
+        VkCommandBuffer cmdBuf = ctx->cmdList->getCommandBuffer();
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &m_asyncState.syncSemaphore;
+        submitInfo.pSignalSemaphores = &syncSemaphore;
 
-        vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, m_asyncState.syncFence);
-        m_asyncState.isSubmitted = true;
+        vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, ctx->syncFence);
 
-        // 転送が終わったリクエストリストをクリア
         state.pendingUploads.clear();
         state.pendingImageUploads.clear();
-        
-        m_pendingAsyncSemaphores.push_back(m_asyncState.syncSemaphore);
-        return m_asyncState.syncSemaphore;
+
+        return syncSemaphore;
     }
 
     void VulkanUploadManager::waitUploads() {
-        ensureAsyncReady(); // CPU待機
+        retireCompletedAsyncContexts(true); // waitAll = true で全フェンス待機
     }
 
     std::vector<rhi::SemaphoreHandle> VulkanUploadManager::consumeAsyncSemaphores() {
@@ -185,5 +222,25 @@ namespace rhi::vk {
         }
         m_pendingAsyncSemaphores.clear();
         return sems;
+    }
+
+    std::unique_ptr<VulkanBuffer> VulkanUploadManager::getOrCreateRingBuffer(size_t size) {
+        if (!m_freeRingBuffers.empty()) {
+            auto buf = std::move(m_freeRingBuffers.back());
+            m_freeRingBuffers.pop_back();
+            return buf;
+        }
+        // プールが空なら新規作成
+        return std::make_unique<VulkanBuffer>(
+            m_device, m_device.getAllocator(), size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VMA_MEMORY_USAGE_CPU_TO_GPU
+        );
+    }
+
+    void VulkanUploadManager::resetRingBufferState(UploadState& state, std::unique_ptr<VulkanBuffer> newBuffer) {
+        state.ringBuffer = std::move(newBuffer);
+        state.ringMappedPtr = static_cast<uint8_t*>(state.ringBuffer->map());
+        state.ringBufferOffset = 0;
     }
 }

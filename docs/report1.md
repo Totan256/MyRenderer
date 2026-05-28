@@ -36,3 +36,11 @@
     - ディスクリプタ更新をコマンドバッファ処理後にまとめて実行
     - 中間テクスチャのミニマップ生成Compute Shader ダウンサンプリングのヘルパー
     - Instance Index / DrawID 駆動
+
+- should / safety
+    - [ ] UploadManager: 画像アップロード時の bufferOffset アライメントを `optimalBufferCopyOffsetAlignment` に準拠させる (ハードウェア互換性向上)
+    - [ ] UploadManager: 転送専用キューでの `vkCmdBlitImage` 呼び出しを廃止し、ミップマップ生成処理を完全に RenderGraph に委譲する (関心の分離・バグ防止)
+- want / optimization
+    - [ ] UploadManager: 巨大アセットロード時、メモリピークを抑えるためのストリーミング（チャンク分割）転送のサポート
+    - [ ] UploadManager: マルチスレッド環境からの enqueue に備えたスレッドセーフ化
+    - [ ] ReadbackManager: GPUからCPUへ結果をノンブロッキングで取得する非同期ダウンロード機構の実装

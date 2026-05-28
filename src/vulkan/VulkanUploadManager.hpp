@@ -7,6 +7,12 @@
 #include <vector>
 #include <unordered_map>
 
+/*
+アップロードを「リクエスト溜め込み」「submit」「wait」で分割
+submitがされてなければレンダーグラフが遅延アップロードとして行い，
+waitだけされてなければレンダーグラフがセマフォを設置することで開発者がアップロードを柔軟に行えることを期待
+*/
+
 namespace rhi::vk {
     struct StagingAllocation {
         VulkanBuffer* buffer;
@@ -23,11 +29,13 @@ namespace rhi::vk {
         std::vector<std::unique_ptr<VulkanBuffer>> pendingTemporaryBuffers;
     };
 
-    struct AsyncUploadState : public UploadState {
+    struct AsyncUploadContext {
         std::unique_ptr<VulkanCommandList> cmdList;
-        VkSemaphore syncSemaphore = VK_NULL_HANDLE;
         VkFence syncFence = VK_NULL_HANDLE;
-        bool isSubmitted = false; 
+        
+        // この非同期アップロードで使用中のステージングバッファを保持（転送完了後に破棄/再利用）
+        std::vector<std::unique_ptr<VulkanBuffer>> retainedBuffers;
+        std::unique_ptr<VulkanBuffer> retainedRingBuffer;
     };
 
     struct PerFrameUploadState : public UploadState {
@@ -58,11 +66,21 @@ namespace rhi::vk {
         uint32_t m_framesInFlight;
         uint32_t m_currentFrameIndex = 0;
 
-        AsyncUploadState m_asyncState; // ImmediateとAsyncで共用
+        std::vector<std::unique_ptr<AsyncUploadContext>> m_asyncContextPool;
+        std::vector<AsyncUploadContext*> m_activeAsyncContexts;
         std::vector<PerFrameUploadState> m_frameStates;
         std::vector<VkSemaphore> m_pendingAsyncSemaphores;
 
+        // 再利用可能なリングバッファのプール
+        std::vector<std::unique_ptr<VulkanBuffer>> m_freeRingBuffers;
+        // レームごとに使用済みのセマフォを保持し、安全なタイミングで返却する
+        std::vector<std::vector<VkSemaphore>> m_frameSemaphoresToRelease;
+
+        AsyncUploadContext* getOrCreateAsyncContext();
+        void retireCompletedAsyncContexts(bool waitAll = false);
+
         StagingAllocation allocateStagingSpace(UploadState& state, size_t size, size_t alignment = 4);
-        void ensureAsyncReady();
+        std::unique_ptr<VulkanBuffer> getOrCreateRingBuffer(size_t size);
+        void resetRingBufferState(UploadState& state, std::unique_ptr<VulkanBuffer> newBuffer);
     };
 }
