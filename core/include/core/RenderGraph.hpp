@@ -10,8 +10,8 @@
 #include <optional>
 #include <stdexcept>
 #include <cstring>
-#include "RHIcommon.hpp"
-#include "RHIForward.hpp"
+#include "rhi/RHIcommon.hpp"
+#include "rhi/RHIForward.hpp"
 #include "rhi/Resource.hpp"
 #include "rhi/CommandList.hpp"
 #include "utils/StringHash.hpp"

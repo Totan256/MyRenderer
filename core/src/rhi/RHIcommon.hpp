@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <cstdint>
 
 namespace rhi {
     using SemaphoreHandle = void*;// 同期用の抽象ハンドル

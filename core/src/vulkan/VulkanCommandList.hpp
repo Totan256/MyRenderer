@@ -1,12 +1,12 @@
 ﻿#pragma once
 
 #include <vulkan/vulkan.h>
-#include "RHIcommon.hpp"
+#include "rhi/RHIcommon.hpp"
 #include "VulkanDevice.hpp"
 #include "VulkanComputePipeline.hpp"
 #include "VulkanBuffer.hpp"
 #include "VulkanImage.hpp"
-#include "CommandList.hpp"
+#include "rhi/CommandList.hpp"
 
 namespace rhi::vk{
 

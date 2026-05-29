@@ -2,8 +2,8 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include "VulkanDevice.hpp"
-#include "RHIcommon.hpp"
-#include "RHIForward.hpp"
+#include "rhi/RHIcommon.hpp"
+#include "rhi/RHIForward.hpp"
 
 namespace rhi::vk{
     class VulkanImage : public rhi::Image {

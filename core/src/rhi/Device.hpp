@@ -5,7 +5,7 @@
 #include "rhi/Resource.hpp"
 #include "RHIForward.hpp"
 #include "RHIcommon.hpp"
-#include "RenderGraph.hpp"
+#include "core/RenderGraph.hpp"
 #include "CommandList.hpp"
 #include "UploadManager.hpp"
 

@@ -1,8 +1,8 @@
 ﻿#include "Renderer.hpp"
 #include "vulkan/VulkanDevice.hpp"
-#include "RenderGraph.hpp"
-#include "CommandList.hpp"
-#include "ImageExporter.hpp"
+#include "core/RenderGraph.hpp"
+#include "rhi/CommandList.hpp"
+#include "utils/ImageExporter.hpp"
 #include "utils/StringHash.hpp"
 #include "utils/ModelImporter.hpp" // ★追加
 #include <iostream>
@@ -68,7 +68,7 @@ void Renderer::render(float time) {
         .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
         .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
         .setGraphicsState({
-            .cullMode = rhi::CullMode::None, // ★ 変更: 背面カリングを有効に
+            .cullMode = rhi::CullMode::Back, // ★ 変更: 背面カリングを有効に
             .depthTestEnable = true,         // ★ 変更: 深度テストを有効に
             .depthWriteEnable = true         // ★ 変更: 深度書き込みを有効に
         });
@@ -96,6 +96,6 @@ void Renderer::render(float time) {
     std::cout << "Saving result to model_test.png..." << std::endl;
     outputBuffer->invalidate();
 
-    ImageExporter::savePngUint8("model_test.png", m_width, m_height, outputBuffer->map());
+    ImageExporter::savePngUint8("workspace/model_test.png", m_width, m_height, outputBuffer->map());
     outputBuffer->unmap();
 }
