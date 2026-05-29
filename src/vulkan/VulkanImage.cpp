@@ -36,7 +36,7 @@ namespace rhi::vk{
         viewInfo.image = m_image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = mapFormat(m_desc.format);
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.aspectMask = mapAspectFlags(m_desc.format);
         viewInfo.subresourceRange.baseMipLevel = 0;
         viewInfo.subresourceRange.levelCount = 1;
         viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -184,7 +184,7 @@ namespace rhi::vk{
         viewInfo.image = m_image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = mapFormat(m_desc.format);
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.aspectMask = mapAspectFlags(m_desc.format);
         viewInfo.subresourceRange.baseMipLevel = mipLevel;
         viewInfo.subresourceRange.levelCount = 1;     
         viewInfo.subresourceRange.baseArrayLayer = 0;

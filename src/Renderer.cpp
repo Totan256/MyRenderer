@@ -39,6 +39,12 @@ void Renderer::render(float time) {
         rhi::ImageUsageFlags::ColorAttachment | rhi::ImageUsageFlags::TransferSrc | rhi::ImageUsageFlags::Storage
     });
 
+    auto depthImage = m_device.createImage({
+        m_width, m_height, 1, 1, 1, 
+        rhi::Format::D32_Sfloat, // 深度フォーマット
+        rhi::ImageUsageFlags::DepthStencilAttachment | rhi::ImageUsageFlags::Storage
+    });
+
     size_t pixelBufferSize = m_width * m_height * 4;
     auto outputBuffer = m_device.createBuffer({
         pixelBufferSize, 
@@ -49,6 +55,7 @@ void Renderer::render(float time) {
     auto graph = m_device.createRenderGraph();
     auto hOutputImg = graph->importResource(outputImage.get(), "outputImage"_hash);
     auto hOutputBuf = graph->importResource(outputBuffer.get(), "outputBuffer"_hash);
+    auto hDepthImg = graph->importResource(depthImage.get(), "depthImage"_hash);
 
     // 2. モデルのバッファ群をRenderGraphに一括インポート
     // 内部で "ModelPos"_hash, "ModelAttr"_hash, "ModelIdx"_hash が登録されます
@@ -59,11 +66,13 @@ void Renderer::render(float time) {
     // 3. グラフィックパスクラスの構築
     auto& pass = graph->addGraphicsPass("ModelRenderPass", "shaders/model.vert", "shaders/model.frag")
         .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
+        .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
         .setGraphicsState({
-            .cullMode = rhi::CullMode::None, // 表裏どちらも描画
-            .depthTestEnable = false        // 現在深度テクスチャがないため無効
+            .cullMode = rhi::CullMode::Back, // ★ 変更: 背面カリングを有効に
+            .depthTestEnable = true,         // ★ 変更: 深度テストを有効に
+            .depthWriteEnable = true         // ★ 変更: 深度書き込みを有効に
         });
-
+        
     if (m_bunnyModel) {
         // サブメッシュごとに描画コマンドをレコード
         // PVP方式のため、頂点数として「インデックス数」を流し込みます

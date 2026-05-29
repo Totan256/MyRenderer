@@ -557,7 +557,10 @@ namespace rhi::vk {
                         imgBarrier.dstStageMask = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                         imgBarrier.oldLayout = prev.layout; imgBarrier.newLayout = next.layout;
                         imgBarrier.image = m_resourceAllocator.getPhysicalImage(h)->getImage();
-                        imgBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                        imgBarrier.subresourceRange = { 
+                            getAspectMask(m_resourceAllocator.getPhysicalImage(h)->getDesc().format), 
+                            0, VK_REMAINING_MIP_LEVELS, 0, 1 
+                        };
                         m_batches[currentBatchIdx].imageBarriers.push_back(imgBarrier);
                     } else {
                         VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
