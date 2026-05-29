@@ -1,115 +1,89 @@
 ﻿#include "RenderGraph.hpp"
-#include <map>
 #include <queue>
-#include <vector>
-#include <set>
 #include <stdexcept>
-#include <algorithm>
+#include <iostream>
 
+namespace rhi {
 
-
-namespace rhi{
-    
     bool RenderGraph::isWriteUsage(rhi::ResourceState state) {
-        using namespace rhi;
-        return state == ResourceState::StorageWrite || 
-            state == ResourceState::ColorAttachment || 
-            state == ResourceState::DepthStencilWrite || 
-            state == ResourceState::TransferDst;
+        switch (state) {
+            case ResourceState::StorageWrite:
+            case ResourceState::ColorAttachment:
+            case ResourceState::DepthStencilWrite:
+            case ResourceState::TransferDst:
+                return true;
+            default:
+                return false;
+        }
     }
 
-    std::vector<uint32_t> RenderGraph::getSortPasses(std::vector<uint32_t> passIndices){
-        size_t numPasses = m_logicalNodes.size();
-        std::vector <std::set<uint32_t>> adj(numPasses);
-        std::vector<uint32_t> inDegree(numPasses, 0);
-        for (size_t resIdx = 0; resIdx < m_resourceRegistry.size(); ++resIdx){
-            const auto& reg = m_resourceRegistry[resIdx];
-            struct Access { uint32_t passIdx; rhi::ResourceState state; };
-            std::vector<Access> accesses;
-            for (uint32_t p : reg.producers) accesses.push_back({p, rhi::ResourceState::StorageWrite}); // 代表として
+    std::vector<uint32_t> RenderGraph::getSortPasses(std::vector<uint32_t> passIndices) {
+        // パス間の依存関係（DAG）を構築
+        std::vector<std::vector<uint32_t>> adj(m_passes.size());
+        std::vector<uint32_t> inDegree(m_passes.size(), 0);
+
+        for (uint32_t passIdx : passIndices) {
+            const auto& pass = m_passes[passIdx];
             
-            std::sort(accesses.begin(), accesses.end(), [](const Access& a, const Access& b) {
-                return a.passIdx < b.passIdx;
-            });
-
-            uint32_t lastWritePass = 0xFFFFFFFF;
-            std::vector<uint32_t> readsSinceLastWrite;
-
-            for (const auto& access : accesses) {
-                if (isWriteUsage(access.state)) {
-                    // WAW (Write-After-Write): 前の書き込みが終わってから書く
-                    if (lastWritePass != 0xFFFFFFFF) {
-                        if (adj[lastWritePass].insert(access.passIdx).second) {
-                            inDegree[access.passIdx]++;
+            // このパスが読み込むリソースについて、それを書き込む（生産する）パスへの依存を張る
+            for (size_t i = 0; i < pass->getResourceHandles().size(); ++i) {
+                ResourceHandle h = pass->getResourceHandles()[i];
+                ResourceState state = pass->getRequirements()[i].state;
+                
+                if (!isWriteUsage(state)) {
+                    for (uint32_t producerIdx : m_resourceRegistry[h].producers) {
+                        if (producerIdx != passIdx) { // 自己ループの回避
+                            adj[producerIdx].push_back(passIdx);
+                            inDegree[passIdx]++;
                         }
                     }
-                    // WAR (Write-After-Read): 前の読み込みがすべて終わってから上書きする
-                    for (uint32_t readPass : readsSinceLastWrite) {
-                        if (adj[readPass].insert(access.passIdx).second) {
-                            inDegree[access.passIdx]++;
-                        }
-                    }
-                    readsSinceLastWrite.clear();
-                    lastWritePass = access.passIdx;
-                } else {
-                    // RAW (Read-After-Write): 書き込みが終わってから読み込む
-                    if (lastWritePass != 0xFFFFFFFF) {
-                        if (adj[lastWritePass].insert(access.passIdx).second) {
-                            inDegree[access.passIdx]++;
-                        }
-                    }
-                    readsSinceLastWrite.push_back(access.passIdx);
                 }
             }
         }
-        std::queue<uint32_t> queue;
-        for (uint32_t i : passIndices) {
-            if (inDegree[i] == 0) {
-                queue.push(i);
+
+        // Kahnのアルゴリズムによるトポロジカルソート
+        std::queue<uint32_t> q;
+        for (uint32_t passIdx : passIndices) {
+            if (inDegree[passIdx] == 0) {
+                q.push(passIdx);
             }
         }
-        std::vector<uint32_t> sortedPasses;
-        while (!queue.empty()) {
-            uint32_t u = queue.front();
-            queue.pop();
-            sortedPasses.push_back(u);
+
+        std::vector<uint32_t> sortedIndices;
+        while (!q.empty()) {
+            uint32_t u = q.front();
+            q.pop();
+            sortedIndices.push_back(u);
+
             for (uint32_t v : adj[u]) {
                 inDegree[v]--;
-                if (inDegree[v] == 0) queue.push(v);
+                if (inDegree[v] == 0) {
+                    q.push(v);
+                }
             }
         }
-        if (sortedPasses.size() != passIndices.size()) {
-            throw std::runtime_error("RenderGraph contains a cycle!");
+
+        if (sortedIndices.size() != passIndices.size()) {
+            throw std::runtime_error("RenderGraph compilation failed: cyclic dependency detected!");
         }
-        return sortedPasses;
+
+        return sortedIndices;
     }
 
     void RenderGraph::calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices) {
-        if (sortedPassIndices.empty()) return;
-        // 1. 全リソースのライフタイムを初期化
-        // m_resourceRegistry のサイズ分だけライフタイム情報を確保
-        m_resourceLifetimes.assign(m_resourceRegistry.size(), {0xFFFFFFFF, 0});
-        // 2. ソートされた実行順序でパスを走査
-        for (uint32_t executionIndex = 0; executionIndex < (uint32_t)sortedPassIndices.size(); ++executionIndex) {
-            uint32_t passIdx = sortedPassIndices[executionIndex];
-            const auto& node = m_logicalNodes[passIdx];
-            // パスが使用する全リソースハンドルをチェック
-            for (rhi::ResourceHandle h : node.resourceHandles) {
-                auto& lifetime = m_resourceLifetimes[h];
-                // 最初に使われたタイミングを記録
-                if (lifetime.firstPass == 0xFFFFFFFF) {
-                    lifetime.firstPass = executionIndex;
+        m_resourceLifetimes.clear();
+        m_resourceLifetimes.resize(m_resourceRegistry.size(), {0xFFFFFFFF, 0});
+
+        // 実行順序（ソート済みインデックス）に基づいて寿命を計算
+        for (uint32_t i = 0; i < sortedPassIndices.size(); ++i) {
+            uint32_t passIdx = sortedPassIndices[i];
+            const auto& pass = m_passes[passIdx];
+            
+            for (ResourceHandle h : pass->getResourceHandles()) {
+                if (m_resourceLifetimes[h].firstPass == 0xFFFFFFFF) {
+                    m_resourceLifetimes[h].firstPass = i;
                 }
-                // 最後に使われたタイミングを更新
-                lifetime.lastPass = executionIndex;
-            }
-        }
-        // 3. インポートされたリソース（外部リソース）の扱い
-        for (size_t i = 0; i < m_resourceRegistry.size(); ++i) {
-            if (m_resourceRegistry[i].isImported) {
-                // 外部リソース（スワップチェーン等）はグラフの最初から最後まで生存しているとみなす
-                m_resourceLifetimes[i].firstPass = 0;
-                m_resourceLifetimes[i].lastPass = (uint32_t)sortedPassIndices.size() - 1;
+                m_resourceLifetimes[h].lastPass = i;
             }
         }
     }
