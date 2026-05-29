@@ -68,11 +68,11 @@ void Renderer::render(float time) {
         .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
         .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
         .setGraphicsState({
-            .cullMode = rhi::CullMode::Back, // ★ 変更: 背面カリングを有効に
+            .cullMode = rhi::CullMode::None, // ★ 変更: 背面カリングを有効に
             .depthTestEnable = true,         // ★ 変更: 深度テストを有効に
             .depthWriteEnable = true         // ★ 変更: 深度書き込みを有効に
         });
-        
+
     if (m_bunnyModel) {
         // サブメッシュごとに描画コマンドをレコード
         // PVP方式のため、頂点数として「インデックス数」を流し込みます
