@@ -37,7 +37,7 @@ public:
         // 1. バッファの作成
         gpuModel->positionBuffer = device.createBuffer({cpuData.positions.size() * sizeof(VertexPosition), rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst});
         gpuModel->attributeBuffer = device.createBuffer({cpuData.attributes.size() * sizeof(VertexAttributes), rhi::BufferUsageFlags::StorageBuffer | rhi::BufferUsageFlags::TransferDst});
-        gpuModel->indexBuffer = device.createBuffer({cpuData.indices.size() * sizeof(uint32_t), rhi::BufferUsageFlags::IndexBuffer | rhi::BufferUsageFlags::TransferDst});
+        gpuModel->indexBuffer = device.createBuffer({cpuData.indices.size() * sizeof(uint32_t), rhi::BufferUsageFlags::IndexBuffer | rhi::BufferUsageFlags::TransferDst | rhi::BufferUsageFlags::StorageBuffer});
 
         // 2. UploadManager への一括エンキュー (この時点では転送されない)
         uploadManager->enqueueBufferUpload(gpuModel->positionBuffer.get(), cpuData.positions.data(), cpuData.positions.size() * sizeof(VertexPosition));

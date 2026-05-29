@@ -98,4 +98,13 @@ namespace rhi::vk {
         if(m_isPersistentlyMapped) return;
         vmaUnmapMemory(m_allocator, m_allocation);
     }
+
+    void VulkanBuffer::invalidate(size_t offset, size_t size) {
+        VkMemoryPropertyFlags memFlags;
+        vmaGetAllocationMemoryProperties(m_allocator, m_allocation, &memFlags);
+        // HOST_COHERENT（自動同期）でない場合のみ、明示的なInvalidateが必要
+        if ((memFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+            vmaInvalidateAllocation(m_allocator, m_allocation, offset, size);
+        }
+    }
 }

@@ -9,12 +9,13 @@
 
 // ストリーム分離した頂点データ
 struct VertexPosition {
-    glm::vec3 position;
+    glm::vec4 position;
 };
 
 struct VertexAttributes {
-    glm::vec3 normal;
+    glm::vec4 normal;
     glm::vec2 uv;
+    glm::vec2 padding;
     // glm::vec4 tangent;
 };
 

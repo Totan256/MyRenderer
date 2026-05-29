@@ -39,6 +39,8 @@ namespace rhi::vk{
         }
         bool isImage() const override { return false; }
         BufferDesc getDesc() const { return m_desc; }
+        
+        void invalidate(size_t offset = 0, size_t size = VK_WHOLE_SIZE) override;
     private:
         VulkanDevice& m_device;
         VmaAllocator m_allocator; // メモリ管理者の参照

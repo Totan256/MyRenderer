@@ -13,6 +13,8 @@ namespace rhi {
         virtual void setState(ResourceState state, ShaderStage stage) = 0;
     };
 
+    constexpr size_t WHOLE_SIZE = ~0ULL;
+
     class Buffer : public Resource {
     public:
         virtual ~Buffer() = default;
@@ -21,6 +23,7 @@ namespace rhi {
         virtual size_t getSize() const = 0;
         virtual uint32_t getBindlessIndex() const = 0;
         bool isImage() const override { return false; }
+        virtual void invalidate(size_t offset = 0, size_t size = WHOLE_SIZE) = 0;
     };
 
     class Image : public Resource {

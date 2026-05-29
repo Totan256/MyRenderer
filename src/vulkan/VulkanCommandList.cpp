@@ -115,6 +115,7 @@ namespace rhi::vk {
         }
 
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(m_device.getDevice(), 1, &m_fence);
     }
 
     void VulkanCommandList::beginRendering(const std::vector<RenderAttachment>& colorAtts, const RenderAttachment* depthAtt, uint32_t width, uint32_t height) {

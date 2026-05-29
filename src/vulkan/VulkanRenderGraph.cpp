@@ -519,6 +519,8 @@ namespace rhi::vk {
                             if (m_resourceRegistry[h].isImage()) {
                                 auto physImg = m_resourceAllocator.getPhysicalImage(h);
                                 VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                                imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 imgBarrier.srcStageMask = prevTrack.state.stageMask; imgBarrier.srcAccessMask = prevTrack.state.accessMask;
                                 imgBarrier.dstStageMask = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                                 imgBarrier.oldLayout = prevTrack.state.layout; imgBarrier.newLayout = next.layout;
@@ -527,6 +529,8 @@ namespace rhi::vk {
                                 m_batches[currentBatchIdx].imageBarriers.push_back(imgBarrier);
                             } else {
                                 VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                                bufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                                bufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 bufBarrier.srcStageMask = prevTrack.state.stageMask; bufBarrier.srcAccessMask = prevTrack.state.accessMask;
                                 bufBarrier.dstStageMask = next.stageMask; bufBarrier.dstAccessMask = next.accessMask;
                                 bufBarrier.buffer = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
@@ -547,6 +551,8 @@ namespace rhi::vk {
 
                     if (m_resourceRegistry[h].isImage()) {
                         VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                        imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         imgBarrier.srcStageMask = prev.stageMask; imgBarrier.srcAccessMask = prev.accessMask;
                         imgBarrier.dstStageMask = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                         imgBarrier.oldLayout = prev.layout; imgBarrier.newLayout = next.layout;
@@ -555,6 +561,8 @@ namespace rhi::vk {
                         m_batches[currentBatchIdx].imageBarriers.push_back(imgBarrier);
                     } else {
                         VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                        bufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                        bufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         bufBarrier.srcStageMask = prev.stageMask; bufBarrier.srcAccessMask = prev.accessMask;
                         bufBarrier.dstStageMask = next.stageMask; bufBarrier.dstAccessMask = next.accessMask;
                         bufBarrier.buffer = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();

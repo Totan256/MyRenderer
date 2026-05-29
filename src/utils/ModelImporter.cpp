@@ -34,16 +34,17 @@ CpuModelData ModelImporter::loadFromFile(const std::string& filepath) {
         // 頂点データの抽出（ストリーム分離）
         for (unsigned int j = 0; j < mesh->mNumVertices; j++) {
             VertexPosition pos;
-            pos.position = { mesh->mVertices[j].x, mesh->mVertices[j].y, mesh->mVertices[j].z };
+            pos.position = { mesh->mVertices[j].x, mesh->mVertices[j].y, mesh->mVertices[j].z, 1.0f };
             positions.push_back(pos);
 
             VertexAttributes attr{};
             if (mesh->HasNormals()) {
-                attr.normal = { mesh->mNormals[j].x, mesh->mNormals[j].y, mesh->mNormals[j].z };
+                attr.normal = { mesh->mNormals[j].x, mesh->mNormals[j].y, mesh->mNormals[j].z, 1.0f };
             }
             if (mesh->mTextureCoords[0]) {
                 attr.uv = { mesh->mTextureCoords[0][j].x, mesh->mTextureCoords[0][j].y };
             }
+            attr.padding = { 0.0f, 0.0f };
             attributes.push_back(attr);
         }
 
