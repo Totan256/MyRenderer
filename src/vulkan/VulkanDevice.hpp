@@ -11,6 +11,7 @@
 #include "rhi/Resource.hpp"
 #include "RenderGraph.hpp"
 #include "rhi/UploadManager.hpp"
+
 namespace rhi::vk{
     // 前方宣言
     class ConstantBufferManager;
@@ -63,6 +64,7 @@ namespace rhi::vk{
         VkDevice getDevice() const { return m_device; }
         VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
         VmaAllocator getAllocator() const { return m_allocator; }
+        VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
         
         // キューの取得
         VkQueue getQueue(QueueType type) const;
@@ -70,7 +72,7 @@ namespace rhi::vk{
         
         // キャッシュアクセス
         VulkanShaderCache& getShaderCache();
-        VulkanPipelineCache& getPipelineCache();
+        VulkanPipelineCache& getPipelineCacheManager();
         // Bindless用のセットとレイアウトを取得
         VkDescriptorSetLayout getBindlessLayout() const { return m_bindlessLayout; }
         VkDescriptorSet getBindlessDescriptorSet() const { return m_bindlessDescriptorSet; }
@@ -79,13 +81,16 @@ namespace rhi::vk{
         uint32_t getMinUniformBufferOffsetAlignment() const { return m_minUniformBufferOffsetAlignment; }
         ConstantBufferManager& getConstantBufferManager() { return *m_constantBufferManager; }
 
-        // 空いているインデックスを割り当ててディスクリプタ更新
+        // 登録・破棄とディスクリプタバッチ更新
         uint32_t registerBuffer(VkBuffer buffer, VkDeviceSize size);
         uint32_t registerImage(VkImageView view);
         uint32_t registerUniformBuffer(VkBuffer buffer, VkDeviceSize size);
         uint32_t registerSampledImage(VkImageView view);
         uint32_t registerSampler(VkSampler sampler);
-        void unregisterIndex(uint32_t index);
+        void unregisterIndex(uint32_t index, uint32_t binding);
+        
+        void flushDescriptorUpdates(); // バッチ化されたディスクリプタ更新を実行
+
         uint32_t getStaticSampler(StringHash nameHash) const;
         rhi::UploadManager* getUploadManager() override;
 
@@ -96,7 +101,6 @@ namespace rhi::vk{
         };
 
         VkInstance m_instance = VK_NULL_HANDLE;
-        // VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE; // デバッグ用
         VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;
@@ -104,6 +108,8 @@ namespace rhi::vk{
         VkQueue m_graphicsQueue = VK_NULL_HANDLE;
         uint32_t m_graphicsQueueFamilyIndex = 0;
         VmaAllocator m_allocator = VK_NULL_HANDLE;
+        VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
+
         uint32_t m_minUniformBufferOffsetAlignment = 256;
         std::unique_ptr<ConstantBufferManager> m_constantBufferManager;
         VkDescriptorPool m_bindlessPool= VK_NULL_HANDLE;
@@ -116,6 +122,21 @@ namespace rhi::vk{
         std::mutex m_indexMutex;            // スレッド安全のため
 
         const uint32_t MAX_BINDLESS_RESOURCES = 100000;
+
+        // ディスクリプタのバッチ更新用
+        std::mutex m_descriptorMutex;
+        std::vector<VkWriteDescriptorSet> m_pendingWrites;
+        std::deque<VkDescriptorBufferInfo> m_pendingBufferInfos;
+        std::deque<VkDescriptorImageInfo> m_pendingImageInfos;
+
+        // 破棄時の安全化用ダミーリソース
+        void createDummyResources();
+        VkBuffer m_dummyBuffer = VK_NULL_HANDLE;
+        VmaAllocation m_dummyBufferAlloc = VK_NULL_HANDLE;
+        VkImage m_dummyImage = VK_NULL_HANDLE;
+        VkImageView m_dummyImageView = VK_NULL_HANDLE;
+        VmaAllocation m_dummyImageAlloc = VK_NULL_HANDLE;
+        VkSampler m_dummySampler = VK_NULL_HANDLE;
 
         std::map<StringHash, uint32_t> m_staticSamplers;
         std::map<StringHash, VkSampler> m_samplers; 
@@ -145,6 +166,6 @@ namespace rhi::vk{
         std::vector<VkSemaphore> m_semaphorePool;
 
         std::unique_ptr<VulkanShaderCache> m_shaderCache;
-        std::unique_ptr<VulkanPipelineCache> m_pipelineCache;
+        std::unique_ptr<VulkanPipelineCache> m_pipelineCacheManager;
     };
 }

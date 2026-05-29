@@ -5,6 +5,7 @@
 #include "VulkanConstantBufferManager.hpp"
 #include "VulkanCache.hpp"
 #include "RHIconfig.hpp"
+#include "VulkanSync.hpp"
 #include <algorithm>
 #include <numeric>
 #include <iostream>
@@ -17,11 +18,16 @@ namespace rhi::vk {
         return VK_IMAGE_ASPECT_COLOR_BIT;
     };
 
-    // =========================================================
-    // 共通処理用の無名名前空間ヘルパー関数
-    // =========================================================
+    auto getWaitStageForQueue = [](QueueType type) -> VkPipelineStageFlags {
+        switch (type) {
+            case QueueType::Graphics: return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            case QueueType::Compute:  return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+            case QueueType::Transfer: return VK_PIPELINE_STAGE_TRANSFER_BIT;
+            default: return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        }
+    };
+
     namespace {
-        // 全パス共通：ディスパッチやドロー内のオフセット情報から要件を吸い上げる
         void CollectRequirements(
             rhi::RenderPass* pass,
             const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
@@ -44,7 +50,6 @@ namespace rhi::vk {
             uint32_t size = 0;
         };
 
-        // 全パス共通：動的ユニフォームのアロケートとバインドレスインデックスのパッキング
         PushConstantPack BuildPushConstants(
             rhi::vk::VulkanRenderGraph& graph,
             rhi::vk::VulkanDevice& device,
@@ -72,9 +77,7 @@ namespace rhi::vk {
         }
     } // anonymous namespace
 
-    // =========================================================
-    // Vulkan Compute Pass
-    // =========================================================
+    // === パスクラスの実装 ===
     class VulkanComputePass : public ComputePass {
     public:
         VulkanComputePass(const std::string& name, const std::string& shaderPath, QueueType qType, VulkanRenderGraph& graph)
@@ -86,17 +89,14 @@ namespace rhi::vk {
             m_localSizeZ = shaderData.reflection.localSizeZ;
             m_pushConstantOffsets = shaderData.reflection.pushConstantOffsets;
         }
-
         void compile(Device& device) override {
             auto& vkDevice = static_cast<VulkanDevice&>(device);
-            m_pipeline = vkDevice.getPipelineCache().getOrCreateComputePipeline(m_shaderPath, MAX_PUSH_CONSTANT_SIZE);
-            
+            m_pipeline = vkDevice.getPipelineCacheManager().getOrCreateComputePipeline(m_shaderPath, MAX_PUSH_CONSTANT_SIZE);
             std::set<ResourceHandle> seenHandles;
             for (const auto& dsp : m_dispatches) {
                 CollectRequirements(this, dsp.m_resourceOffsets, seenHandles, ShaderStage::Compute);
             }
         }
-
         void execute(CommandList& cmdList) override {
             auto& vkCmd = static_cast<VulkanCommandList&>(cmdList);
             if (m_pipeline) {
@@ -105,13 +105,9 @@ namespace rhi::vk {
             }
             auto& vkDevice = static_cast<VulkanDevice&>(m_graph.getDevice());
             auto& vkGraph = static_cast<VulkanRenderGraph&>(m_graph);
-
             for (auto& state : m_dispatches) {
                 auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms);
-                
-                if (pack.size > 0) {
-                    vkCmd.setPushData(0, pack.size, pack.data.data());
-                }
+                if (pack.size > 0) vkCmd.setPushData(0, pack.size, pack.data.data());
                 vkCmd.dispatch(state.m_x, state.m_y, state.m_z);
             }
         }
@@ -119,9 +115,6 @@ namespace rhi::vk {
         VulkanComputePipeline* m_pipeline = nullptr;
     };
 
-    // =========================================================
-    // Vulkan Graphics Pass
-    // =========================================================
     class VulkanGraphicsPass : public GraphicsPass {
     public:
         VulkanGraphicsPass(const std::string& name, const std::string& vertPath, const std::string& fragPath, VulkanRenderGraph& graph)
@@ -132,11 +125,9 @@ namespace rhi::vk {
             m_pushConstantOffsets = vertData.reflection.pushConstantOffsets;
             m_outputLocations = fragData.reflection.outputLocations;
         }
-
         void compile(Device& device) override {
             auto& vkDevice = static_cast<VulkanDevice&>(device);
             auto& graph = static_cast<VulkanRenderGraph&>(m_graph);
-
             std::vector<VkFormat> vkColorFormats;
             for (const auto& att : m_colorAttachments) {
                 const auto& reg = graph.getRegistration(att.handle);
@@ -147,7 +138,6 @@ namespace rhi::vk {
                 }
                 addRequirement(att.handle, ResourceState::ColorAttachment, ShaderStage::Fragment);
             }
-
             VkFormat vkDepthFormat = VK_FORMAT_UNDEFINED;
             if (m_depthAttachment.has_value()) {
                 const auto& reg = graph.getRegistration(m_depthAttachment->handle);
@@ -158,10 +148,8 @@ namespace rhi::vk {
                 }
                 addRequirement(m_depthAttachment->handle, ResourceState::DepthStencilWrite, ShaderStage::Fragment);
             }
-
-            m_pipeline = vkDevice.getPipelineCache().getOrCreateGraphicsPipeline(
+            m_pipeline = vkDevice.getPipelineCacheManager().getOrCreateGraphicsPipeline(
                 m_vertShaderPath, m_fragShaderPath, vkColorFormats, vkDepthFormat, MAX_PUSH_CONSTANT_SIZE);
-
             std::set<ResourceHandle> seenHandles;
             for (const auto& draw : m_draws) {
                 CollectRequirements(this, draw.m_resourceOffsets, seenHandles, ShaderStage::AllGraphics);
@@ -171,17 +159,14 @@ namespace rhi::vk {
                 }
             }
         }
-
         void execute(CommandList& cmdList) override {
             auto& vkCmd = static_cast<VulkanCommandList&>(cmdList);
             VkCommandBuffer cmdBuf = vkCmd.getCommandBuffer();
             auto& allocator = static_cast<VulkanRenderGraph&>(m_graph).getAllocator();
-
             if (m_pipeline) {
                 std::vector<VulkanCommandList::RenderAttachment> vkColorAtts;
                 std::optional<VulkanCommandList::RenderAttachment> vkDepthAtt = std::nullopt;
                 uint32_t width = 0, height = 0;
-
                 std::vector<ColorAttachmentInfo> sortedAtts = m_colorAttachments;
                 std::sort(sortedAtts.begin(), sortedAtts.end(), [](const auto& a, const auto& b){ return a.location < b.location; });
                 
@@ -192,7 +177,6 @@ namespace rhi::vk {
                     clearVal.color = {{att.clearValue.r, att.clearValue.g, att.clearValue.b, att.clearValue.a}};
                     vkColorAtts.push_back({ img->getView(), mapLoadOp(att.loadOp), mapStoreOp(att.storeOp), clearVal });
                 }
-
                 if (m_depthAttachment.has_value()) {
                     VulkanImage* depthImg = allocator.getPhysicalImage(m_depthAttachment->handle);
                     if (width == 0) { width = depthImg->getDesc().width; height = depthImg->getDesc().height; }
@@ -200,16 +184,13 @@ namespace rhi::vk {
                     clearVal.depthStencil = { m_depthAttachment->clearValue.depth, m_depthAttachment->clearValue.stencil };
                     vkDepthAtt = { depthImg->getView(), mapLoadOp(m_depthAttachment->loadOp), mapStoreOp(m_depthAttachment->storeOp), clearVal };
                 }
-
                 if (width == 0 || height == 0) return;
-
                 const VulkanCommandList::RenderAttachment* pDepthAtt = vkDepthAtt.has_value() ? &vkDepthAtt.value() : nullptr;
                 vkCmd.beginRendering(vkColorAtts, pDepthAtt, width, height);
 
                 vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->getPipeline());
                 VkDescriptorSet globalSet = static_cast<VulkanDevice&>(m_graph.getDevice()).getBindlessDescriptorSet();
                 vkCmdBindDescriptorSets(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->getPipelineLayout(), 0, 1, &globalSet, 0, nullptr);
-
                 vkCmd.setTopology(mapTopology(m_graphicsState.topology));
                 vkCmd.setCullMode(mapCullMode(m_graphicsState.cullMode));
                 vkCmd.setFrontFace(mapFrontFace(m_graphicsState.frontFace));
@@ -219,14 +200,11 @@ namespace rhi::vk {
 
                 auto& vkDevice = static_cast<VulkanDevice&>(m_graph.getDevice());
                 auto& vkGraph = static_cast<VulkanRenderGraph&>(m_graph);
-
                 for (auto& state : m_draws) {
                     auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms);
-                    
                     if (pack.size > 0) {
                         vkCmdPushConstants(cmdBuf, m_pipeline->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pack.size, pack.data.data());
                     }
-
                     if (state.m_isIndirect) {
                         VkBuffer indirectBuf = allocator.getPhysicalBuffer(state.m_indirectBuffer)->getNativeBuffer();
                         VkBuffer countBuf = allocator.getPhysicalBuffer(state.m_countBuffer)->getNativeBuffer();
@@ -242,19 +220,14 @@ namespace rhi::vk {
         VulkanGraphicsPipeline* m_pipeline = nullptr;
     };
 
-    // =========================================================
-    // Vulkan Copy Pass
-    // =========================================================
     class VulkanCopyPass : public CopyPass {
     public:
         VulkanCopyPass(const std::string& name, ResourceHandle src, ResourceHandle dst, size_t size, QueueType qType, VulkanRenderGraph& graph)
             : CopyPass(name, src, dst, size, qType, graph) {}
-
         void compile(Device& device) override {
             addRequirement(m_src, ResourceState::TransferSrc, ShaderStage::Transfer);
             addRequirement(m_dst, ResourceState::TransferDst, ShaderStage::Transfer);
         }
-
         void execute(CommandList& cmdList) override {
             auto& vkCmd = static_cast<VulkanCommandList&>(cmdList);
             VkCommandBuffer cmdBuf = vkCmd.getCommandBuffer();
@@ -287,9 +260,6 @@ namespace rhi::vk {
         }
     };
 
-    // =========================================================
-    // Helper System Passes (Multiple Copy & Mipmap)
-    // =========================================================
     class VulkanMultiCopyPass : public RenderPass {
     public:
         VulkanMultiCopyPass(const std::string& name, RenderGraph& graph) : RenderPass(name, PassType::Copy, QueueType::Transfer, graph) {}
@@ -337,10 +307,6 @@ namespace rhi::vk {
         std::vector<ResourceHandle> m_images;
     };
 
-
-    // =========================================================
-    // Vulkan Render Graph Implementation
-    // =========================================================
     VulkanRenderGraph::~VulkanRenderGraph() {
         clearBatchSemaphores();
     }
@@ -404,6 +370,8 @@ namespace rhi::vk {
     void VulkanRenderGraph::compile() {
         std::cout << "Compiling RenderGraph..." << std::endl;
         clearBatchSemaphores();
+        
+        m_device.flushDescriptorUpdates();
 
         // 0. Auto Upload Passes
         auto uploadManager = m_device.getUploadManager();
@@ -454,6 +422,8 @@ namespace rhi::vk {
         calculateLifetimes(sortedIndices);
         m_resourceAllocator.allocate(m_resourceRegistry, m_resourceLifetimes);
 
+        m_device.flushDescriptorUpdates();
+
         // 3. Batch Division
         m_batches.clear();
         QueueType currentQueue = QueueType::Compute; 
@@ -476,7 +446,8 @@ namespace rhi::vk {
                     m_batchSemaphores.push_back(sem);
                     prevBatch.signalSemaphores.push_back(sem);
                     currentBatch->waitSemaphores.push_back(sem);
-                    currentBatch->waitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); 
+                    // 修正点3: 待機ステージの最適化
+                    currentBatch->waitStages.push_back(getWaitStageForQueue(currentBatch->queueType)); 
                 }
             }
             currentBatch->passIndices.push_back(passIdx);
@@ -484,7 +455,13 @@ namespace rhi::vk {
         }
 
         // 4. Barriers & Transitions
-        struct ResourceTrackingState { uint32_t lastPassIdx; VulkanResourceState state; QueueType queueType; };
+        struct ResourceTrackingState { 
+            uint32_t lastPassIdx; 
+            VulkanResourceState state; 
+            QueueType queueType;
+            rhi::ResourceState rhiState;
+            rhi::ShaderStage rhiStage;
+        };
         std::map<rhi::ResourceHandle, ResourceTrackingState> currentStates;
         
         for (uint32_t passIdx : sortedIndices) {
@@ -519,18 +496,10 @@ namespace rhi::vk {
                             VkImageMemoryBarrier2 acquireBarrier = releaseBarrier;
                             acquireBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE; acquireBarrier.srcAccessMask = VK_ACCESS_2_NONE;
                             acquireBarrier.dstStageMask = next.stageMask; acquireBarrier.dstAccessMask = next.accessMask;
+                            acquireBarrier.oldLayout = prevTrack.state.layout; 
+                            acquireBarrier.newLayout = next.layout;
                             m_batches[currentBatchIdx].imageBarriers.push_back(acquireBarrier);
                             
-                            if (prevTrack.state.layout != next.layout) {
-                                VkImageMemoryBarrier2 layoutBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-                                layoutBarrier.srcStageMask = next.stageMask; layoutBarrier.srcAccessMask = next.accessMask;
-                                layoutBarrier.dstStageMask = next.stageMask; layoutBarrier.dstAccessMask = next.accessMask;
-                                layoutBarrier.oldLayout = prevTrack.state.layout; layoutBarrier.newLayout = next.layout;
-                                layoutBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; layoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                                layoutBarrier.image = img;
-                                layoutBarrier.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
-                                m_batches[currentBatchIdx].imageBarriers.push_back(layoutBarrier);
-                            }
                         } else {
                             VkBuffer buf = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
                             VkBufferMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
@@ -568,6 +537,14 @@ namespace rhi::vk {
                     }
                 } else {
                     VulkanResourceState prev = VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
+                    
+                    // インポートされた物理リソースの場合、その現在の状態を取得して初期レイアウトとする
+                    if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
+                        rhi::ResourceState currState = m_resourceRegistry[h].physicalResource->getCurrentState();
+                        rhi::ShaderStage currStage = m_resourceRegistry[h].physicalResource->getCurrentStage();
+                        prev = MapResourceState(currState, currStage);
+                    }
+
                     if (m_resourceRegistry[h].isImage()) {
                         VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                         imgBarrier.srcStageMask = prev.stageMask; imgBarrier.srcAccessMask = prev.accessMask;
@@ -585,9 +562,17 @@ namespace rhi::vk {
                         m_batches[currentBatchIdx].bufferBarriers.push_back(bufBarrier);
                     }
                 }
-                currentStates[h] = ResourceTrackingState{ passIdx, next, pass->getQueueType() };
+                currentStates[h] = ResourceTrackingState{ passIdx, next, pass->getQueueType(), req.state, req.stage };
             }
         }
+        
+        // グラフ実行完了後の最終状態を物理リソースに記録し、次フレームで正しく引き継げるようにする
+        for (const auto& [h, track] : currentStates) {
+            if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
+                m_resourceRegistry[h].physicalResource->setState(track.rhiState, track.rhiStage);
+            }
+        }
+        
         m_sortedIndices = sortedIndices;
     }
 
@@ -595,6 +580,22 @@ namespace rhi::vk {
         auto asyncSems = m_device.getUploadManager()->consumeAsyncSemaphores();
         std::vector<SemaphoreHandle> combinedWaitSems = waitSemaphores;
         combinedWaitSems.insert(combinedWaitSems.end(), asyncSems.begin(), asyncSems.end());
+
+        // --- 修正点2: バッチサブミット用の構造体 ---
+        struct SubmitBatch {
+            VkQueue queue = VK_NULL_HANDLE;
+            std::vector<VkSubmitInfo> submits;
+            VkFence fence = VK_NULL_HANDLE;
+            
+            // VkSubmitInfoが指すポインタの寿命をこの構造体内で管理する
+            std::vector<std::vector<VkSemaphore>> waitSemaphoresList;
+            std::vector<std::vector<VkPipelineStageFlags>> waitStagesList;
+            std::vector<std::vector<VkSemaphore>> signalSemaphoresList;
+            std::vector<VkCommandBuffer> cmdBuffers;
+        };
+
+        std::vector<SubmitBatch> submitBatches;
+        SubmitBatch currentSubmitBatch;
 
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
             auto& batch = m_batches[batchIdx];
@@ -611,42 +612,62 @@ namespace rhi::vk {
                 vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
             }
 
-            // 委譲により各パスの実装を呼び出す
             for (uint32_t passIdx : batch.passIndices) {
                 m_passes[passIdx]->execute(*batch.cmdList);
             }
 
             batch.cmdList->end();
 
-            VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+            // キューの切り替え判定
+            VkQueue queue = m_device.getQueue(batch.queueType);
+            if (currentSubmitBatch.queue != queue && currentSubmitBatch.queue != VK_NULL_HANDLE) {
+                submitBatches.push_back(currentSubmitBatch);
+                currentSubmitBatch = SubmitBatch{};
+            }
+            currentSubmitBatch.queue = queue;
+
             std::vector<VkSemaphore> currentWaitSemaphores = batch.waitSemaphores;
             std::vector<VkPipelineStageFlags> currentWaitStages = batch.waitStages;
 
             if (batchIdx == 0) {
                 for (auto semHandle : combinedWaitSems) {
                     currentWaitSemaphores.push_back(static_cast<VkSemaphore>(semHandle));
-                    currentWaitStages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT); 
+                    currentWaitStages.push_back(getWaitStageForQueue(batch.queueType)); 
                 }
             }
-            if (!currentWaitSemaphores.empty()) {
-                submitInfo.waitSemaphoreCount = (uint32_t)currentWaitSemaphores.size();
-                submitInfo.pWaitSemaphores = currentWaitSemaphores.data();
-                submitInfo.pWaitDstStageMask = currentWaitStages.data();
-            }
-            if (!batch.signalSemaphores.empty()) {
-                submitInfo.signalSemaphoreCount = (uint32_t)batch.signalSemaphores.size();
-                submitInfo.pSignalSemaphores = batch.signalSemaphores.data();
-            }
-            
-            submitInfo.commandBufferCount = 1;
-            submitInfo.pCommandBuffers = &vkCmdBuf;
 
-            VkQueue queue = m_device.getQueue(batch.queueType);
-            VkFence frameFence = VK_NULL_HANDLE;
+            // サブミット情報の蓄積
+            currentSubmitBatch.waitSemaphoresList.push_back(currentWaitSemaphores);
+            currentSubmitBatch.waitStagesList.push_back(currentWaitStages);
+            currentSubmitBatch.signalSemaphoresList.push_back(batch.signalSemaphores);
+            currentSubmitBatch.cmdBuffers.push_back(vkCmdBuf);
+            currentSubmitBatch.submits.push_back(VkSubmitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO}); // ダミーをPush。後でポインタを張る
+
             if (batchIdx == m_batches.size() - 1) {
-                frameFence = m_device.getCurrentFrameFence();
+                currentSubmitBatch.fence = m_device.getCurrentFrameFence();
             }
-            VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, frameFence));
+        }
+
+        if (currentSubmitBatch.queue != VK_NULL_HANDLE) {
+            submitBatches.push_back(currentSubmitBatch);
+        }
+
+        // --- バッチサブミットの実行 ---
+        for (auto& sb : submitBatches) {
+            // vectorが再アロケートされないこのタイミングで、安全にポインタを設定する
+            for(size_t i = 0; i < sb.submits.size(); ++i) {
+                sb.submits[i].waitSemaphoreCount = (uint32_t)sb.waitSemaphoresList[i].size();
+                sb.submits[i].pWaitSemaphores = sb.waitSemaphoresList[i].empty() ? nullptr : sb.waitSemaphoresList[i].data();
+                sb.submits[i].pWaitDstStageMask = sb.waitStagesList[i].empty() ? nullptr : sb.waitStagesList[i].data();
+
+                sb.submits[i].signalSemaphoreCount = (uint32_t)sb.signalSemaphoresList[i].size();
+                sb.submits[i].pSignalSemaphores = sb.signalSemaphoresList[i].empty() ? nullptr : sb.signalSemaphoresList[i].data();
+
+                sb.submits[i].commandBufferCount = 1;
+                sb.submits[i].pCommandBuffers = &sb.cmdBuffers[i];
+            }
+            // キューごとに1回だけ実行
+            VK_CHECK(vkQueueSubmit(sb.queue, (uint32_t)sb.submits.size(), sb.submits.data(), sb.fence));
         }
     }
 }

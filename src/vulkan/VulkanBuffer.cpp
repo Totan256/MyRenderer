@@ -5,31 +5,27 @@ namespace rhi::vk {
     
     VulkanBuffer::VulkanBuffer(VulkanDevice& device, VmaAllocator allocator,
         VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
-        : m_device(device), m_allocator(allocator){
+        : m_device(device), m_allocator(allocator) {
         
-        // UBOの場合はアライメントサイズに切り上げ
         if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
             VkDeviceSize align = m_device.getMinUniformBufferOffsetAlignment();
             m_desc.size = (size + align - 1) & ~(align - 1);
         } else {
             m_desc.size = size;
         }
-        // 1. バッファ作成情報の定義
+        
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = m_desc.size;
         bufferInfo.usage = bufferUsage;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        // 2. VMAの割り当て情報の定義
         VmaAllocationCreateInfo allocInfo = {};
         allocInfo.usage = memoryUsage;
         VkResult result;
-        // VMA_MEMORY_USAGE_AUTO はVulkanの推奨メモリタイプを自動選択します。
-        // CPUから書き込みたい場合（CPU_TO_GPU）は、自動的にマッパブルなメモリを選んでくれます。
+        
         if (memoryUsage == VMA_MEMORY_USAGE_AUTO_PREFER_HOST || 
             memoryUsage == VMA_MEMORY_USAGE_CPU_TO_GPU) {
-            // マップ可能にしておく（永続的にマップするフラグ）
             allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | 
                       VMA_ALLOCATION_CREATE_MAPPED_BIT;
             m_isPersistentlyMapped = true;
@@ -37,45 +33,44 @@ namespace rhi::vk {
             result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, &resInfo);
             m_mappedPtr = resInfo.pMappedData;
             
-        } else{
+        } else {
             result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, nullptr);
         }
 
-        // 3. バッファとメモリを同時に作成
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Failed to create buffer!");
         }
 
         if (bufferUsage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) {
             m_bindlessIndex = device.registerUniformBuffer(m_buffer, m_desc.size);
+            m_bindlessBinding = 2; // Binding 2: Uniform Buffer
         } else {
             m_bindlessIndex = device.registerBuffer(m_buffer,  m_desc.size);
+            m_bindlessBinding = 0; // Binding 0: Storage Buffer
         }
     }
 
     VulkanBuffer::~VulkanBuffer() {
-        // 重要: 生のハンドルをコピーしてクロージャに渡す
         VkBuffer buffer = m_buffer;
         VmaAllocation alloc = m_allocation;
         VmaAllocator allocator = m_allocator;
         uint32_t bindlessIdx = m_bindlessIndex;
+        uint32_t bindlessBinding = m_bindlessBinding;
         auto& device = m_device;
 
-        m_device.enqueueDeletion([buffer, alloc, allocator, bindlessIdx, &device]() {
+        m_device.enqueueDeletion([buffer, alloc, allocator, bindlessIdx, bindlessBinding, &device]() {
             if (buffer != VK_NULL_HANDLE) {
-                device.unregisterIndex(bindlessIdx);
+                device.unregisterIndex(bindlessIdx, bindlessBinding);
                 vmaDestroyBuffer(allocator, buffer, alloc);
             }
         });
     }
 
     void VulkanBuffer::writeData(const void* data, size_t dataSize) {
-        // サイズチェック
         if (dataSize > m_desc.size) {
             throw std::runtime_error("Data size is larger than buffer size!");
         }
 
-        // VMAを使ってメモリをマップ（CPUからアクセス可能なポインタを取得）
         void* mappedData;
         if(m_isPersistentlyMapped){
             mappedData = m_mappedPtr;
@@ -85,9 +80,7 @@ namespace rhi::vk {
             if (result != VK_SUCCESS) {
                 throw std::runtime_error("Failed to map buffer memory!");
             }
-            // データをコピー
             std::memcpy(mappedData, data, dataSize);
-            // アンマップ（書き込み終了）
             vmaUnmapMemory(m_allocator, m_allocation);
         }
     }

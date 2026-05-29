@@ -1,5 +1,5 @@
 ﻿#include "VulkanGraphicsPipeline.hpp"
-#include "VulkanComputePipeline.hpp" // シェーダーコンパイル用のユーティリティを借用
+#include "utils/ShaderCompiler.hpp" 
 #include <stdexcept>
 #include <iostream>
 
@@ -11,10 +11,11 @@ namespace rhi::vk {
         const std::string& fragShaderPath,
         const std::vector<VkFormat>& colorFormats,
         VkFormat depthFormat,
-        uint32_t pushContentsSize)
+        uint32_t pushContentsSize,
+        VkPipelineCache cache)
         : m_device(device), m_pushContentsSize(pushContentsSize) 
     {
-        createPipeline(vertShaderPath, fragShaderPath, colorFormats, depthFormat);
+        createPipeline(vertShaderPath, fragShaderPath, colorFormats, depthFormat, cache);
     }
 
     VulkanGraphicsPipeline::~VulkanGraphicsPipeline() {
@@ -25,12 +26,12 @@ namespace rhi::vk {
         if (m_fragShaderModule != VK_NULL_HANDLE) vkDestroyShaderModule(device, m_fragShaderModule, nullptr);
     }
 
-    void VulkanGraphicsPipeline::createPipeline(const std::string& vertPath, const std::string& fragPath, const std::vector<VkFormat>& colorFormats, VkFormat depthFormat) {
+    void VulkanGraphicsPipeline::createPipeline(const std::string& vertPath, const std::string& fragPath, const std::vector<VkFormat>& colorFormats, VkFormat depthFormat, VkPipelineCache cache) {
         VkDevice device = m_device.getDevice();
 
-        // 1. シェーダーモジュールの作成
-        auto vertCode = VulkanComputePipeline::compileGLSLToSPIRV(vertPath, shaderc_vertex_shader);
-        auto fragCode = VulkanComputePipeline::compileGLSLToSPIRV(fragPath, shaderc_fragment_shader);
+        // 1. シェーダーモジュールの作成 (ShaderCompilerを使用)
+        auto vertCode = ShaderCompiler::compileGLSLToSPIRV(vertPath, shaderc_vertex_shader);
+        auto fragCode = ShaderCompiler::compileGLSLToSPIRV(fragPath, shaderc_fragment_shader);
         
         VkShaderModuleCreateInfo vertInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         vertInfo.codeSize = vertCode.size() * sizeof(uint32_t);
@@ -55,7 +56,7 @@ namespace rhi::vk {
         inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-        // 3. Dynamic State の設定 (PSO爆発を防ぐため、変動しうるものは全て動的にする)
+        // 3. Dynamic State の設定
         std::vector<VkDynamicState> dynamicStates = {
             VK_DYNAMIC_STATE_VIEWPORT,
             VK_DYNAMIC_STATE_SCISSOR,
@@ -65,7 +66,6 @@ namespace rhi::vk {
             VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE,     // EDS
             VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE,    // EDS
             VK_DYNAMIC_STATE_DEPTH_COMPARE_OP,      // EDS
-            // 必要に応じてブレンドなども EDS3 で動的化可能
         };
         VkPipelineDynamicStateCreateInfo dynamicState{ VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
@@ -80,7 +80,6 @@ namespace rhi::vk {
         rasterizer.rasterizerDiscardEnable = VK_FALSE;
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f;
-        // 初期値(動的ステートで上書きされるため適当でよい)
         rasterizer.cullMode = VK_CULL_MODE_NONE;
         rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
@@ -89,12 +88,10 @@ namespace rhi::vk {
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
         VkPipelineDepthStencilStateCreateInfo depthStencil{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
-        // 初期値(動的ステートで上書きされる)
         depthStencil.depthTestEnable = VK_TRUE;
         depthStencil.depthWriteEnable = VK_TRUE;
         depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
 
-        // カラーブレンド (一旦シンプルな上書き設定)
         std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachments(colorFormats.size());
         for (auto& attach : colorBlendAttachments) {
             attach.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -105,7 +102,7 @@ namespace rhi::vk {
         colorBlending.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size());
         colorBlending.pAttachments = colorBlendAttachments.data();
 
-        // 4. パイプラインレイアウト (バインドレス)
+        // 4. パイプラインレイアウト
         VkPushConstantRange pushConstantRange{};
         pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         pushConstantRange.offset = 0;
@@ -119,15 +116,15 @@ namespace rhi::vk {
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
         VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
 
-        // 5. Dynamic Rendering 用の連携情報 (RenderPassは使わない)
+        // 5. Dynamic Rendering 用の連携情報
         VkPipelineRenderingCreateInfo renderingInfo{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
         renderingInfo.colorAttachmentCount = static_cast<uint32_t>(colorFormats.size());
         renderingInfo.pColorAttachmentFormats = colorFormats.data();
         renderingInfo.depthAttachmentFormat = depthFormat;
 
-        // 6. Graphics Pipeline の生成
+        // 6. Graphics Pipeline の生成 (キャッシュ適用)
         VkGraphicsPipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-        pipelineInfo.pNext = &renderingInfo; // Dynamic Rendering を指定
+        pipelineInfo.pNext = &renderingInfo; 
         pipelineInfo.stageCount = 2;
         pipelineInfo.pStages = shaderStages;
         pipelineInfo.pVertexInputState = &vertexInputInfo;
@@ -139,9 +136,9 @@ namespace rhi::vk {
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
         pipelineInfo.layout = m_pipelineLayout;
-        pipelineInfo.renderPass = VK_NULL_HANDLE; // RenderPassは不要
+        pipelineInfo.renderPass = VK_NULL_HANDLE;
         pipelineInfo.subpass = 0;
 
-        VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline));
+        VK_CHECK(vkCreateGraphicsPipelines(device, cache, 1, &pipelineInfo, nullptr, &m_pipeline));
     }
 }

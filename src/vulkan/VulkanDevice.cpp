@@ -11,6 +11,7 @@
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanUploadManager.hpp"
 #include <iostream>
+#include <fstream>
 #include <set>
 #include <vector>
 
@@ -18,6 +19,9 @@
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 namespace rhi::vk{
+
+    VulkanDevice::VulkanDevice() = default;
+
     void VulkanDevice::beginFrame() {
         // 現在のフレームのフェンスを待機・リセット
         vkWaitForFences(m_device, 1, &m_inFlightFences[m_frameCounter % m_framesInFlight], VK_TRUE, UINT64_MAX);
@@ -36,9 +40,10 @@ namespace rhi::vk{
         if (m_constantBufferManager) {
             m_constantBufferManager->nextFrame();
         }
-    }
 
-    VulkanDevice::VulkanDevice() = default;
+        // フレーム開始時に保留中のディスクリプタ更新をフラッシュ
+        flushDescriptorUpdates();
+    }
 
     void VulkanDevice::endFrame() {
         m_frameCounter++;
@@ -76,85 +81,96 @@ namespace rhi::vk{
         return *m_shaderCache; 
     }
     
-    VulkanPipelineCache& VulkanDevice::getPipelineCache() { 
-        return *m_pipelineCache; 
+    VulkanPipelineCache& VulkanDevice::getPipelineCacheManager() { 
+        return *m_pipelineCacheManager; 
     }
 
     void VulkanDevice::initialize(){
         std::cout << "--- Initializing VulkanDevice ---" << std::endl;
-        // ヘルパー関数の呼び出し。VK_CHECKが失敗時に例外を投げるため、安全に処理できます。
         createInstance();
         pickPhysicalDevice();
 
-        // 制限の取得
         VkPhysicalDeviceProperties properties;
         vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
         m_minUniformBufferOffsetAlignment = static_cast<uint32_t>(properties.limits.minUniformBufferOffsetAlignment);
 
         createLogicalDevice();
         createAllocator();
-        createBindlessResources();
-        m_shaderCache = std::make_unique<VulkanShaderCache>();
-        m_pipelineCache = std::make_unique<VulkanPipelineCache>(*this);
+        
+        // --- Pipeline Cache の初期化 ---
+        std::vector<char> cacheData;
+        std::ifstream cacheFile(SHADER_CACHE_FILE_NAME, std::ios::ate | std::ios::binary);
+        if (cacheFile.is_open()) {
+            size_t fileSize = (size_t)cacheFile.tellg();
+            cacheData.resize(fileSize);
+            cacheFile.seekg(0);
+            cacheFile.read(cacheData.data(), fileSize);
+            cacheFile.close();
+            std::cout << "Loaded Pipeline Cache (" << fileSize << " bytes)." << std::endl;
+        }
+        VkPipelineCacheCreateInfo cacheInfo{};
+        cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        cacheInfo.initialDataSize = cacheData.size();
+        cacheInfo.pInitialData = cacheData.empty() ? nullptr : cacheData.data();
+        VK_CHECK(vkCreatePipelineCache(m_device, &cacheInfo, nullptr, &m_pipelineCache));
 
-        // ConstantBufferManagerの初期化 (Ring size 16MB, 2 frames)
-        // Todo　リングバッファの実装をあとでする，とりあえず3060で動く分のサイズを用意またはconfigで指定できるようにする
+        createBindlessResources();
+        createDummyResources(); // バインドレス破棄安全化用のダミーを作成
+
+        m_shaderCache = std::make_unique<VulkanShaderCache>();
+        m_pipelineCacheManager = std::make_unique<VulkanPipelineCache>(*this);
+
+        // ConstantBufferManagerの初期化
+        // 注意: UBOとしてバインドするため、リングバッファのサイズはハードウェア制限（maxUniformBufferRange、通常64KB）を超えないようにすること。
+        // 大量の可変長データを扱う場合は、SSBOを使用してください。
         m_constantBufferManager = std::make_unique<ConstantBufferManager>(*this, 65536, 2);
+        
         m_uploadManager = std::make_unique<VulkanUploadManager>(*this, m_framesInFlight, 16 * 1024 * 1024);
 
-        // FIF用フェンスの作成
         m_inFlightFences.resize(m_framesInFlight);
         VkFenceCreateInfo fenceInfo{};
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // 最初はシグナル状態
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         for (uint32_t i = 0; i < m_framesInFlight; i++) {
             VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]));
         }
 
         std::cout << "--- VulkanDevice Initialized Successfully ---" << std::endl;
     }
+
     rhi::UploadManager* VulkanDevice::getUploadManager() {
         return m_uploadManager.get();
     }
 
     void VulkanDevice::createInstance(){
-        // 1. アプリケーション情報の定義
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName = "MyOfflineRenderer";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_3; // Vulkan 1.3を使用
+        appInfo.apiVersion = VK_API_VERSION_1_3;
 
-        // 2. 検証レイヤー（デバッグ用）の有効化設定
         const std::vector<const char*> validationLayers = {
             "VK_LAYER_KHRONOS_validation"
         };
 
-        // 3. インスタンス作成情報の定義
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         createInfo.pApplicationInfo = &appInfo;
         
-        // 検証レイヤーを有効化
-        // 【重要】本番コードでは有効な検証レイヤーがあるかチェックすべきですが、今回は省略します
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
         createInfo.ppEnabledLayerNames = validationLayers.data();
         
-        // デバッグメッセンジャー拡張機能も有効化
         const std::vector<const char*> extensions = {
             VK_EXT_DEBUG_UTILS_EXTENSION_NAME
         };
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
 
-        // 4. Vulkanインスタンスの作成
         std::cout << "Creating Vulkan Instance..." << std::endl;
         VK_CHECK(vkCreateInstance(&createInfo, nullptr, &m_instance));
         std::cout << "Instance created successfully!" << std::endl;
-        
-        // todo : デバッグメッセンジャーの作成処理
     }
 
     std::optional<uint32_t> VulkanDevice::findComputeQueueFamilyIndex(VkPhysicalDevice device){
@@ -165,7 +181,6 @@ namespace rhi::vk{
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
         for (uint32_t i = 0; i < queueFamilyCount; ++i) {
-            // VK_QUEUE_COMPUTE_BITが含まれ、VK_QUEUE_GRAPHICS_BITが含まれないもの（または両方含むもの）を探す
             if (queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT && !(queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 return i;
             }
@@ -341,6 +356,37 @@ namespace rhi::vk{
         std::cout << "VMA Allocator created successfully!" << std::endl;
     }
 
+    void VulkanDevice::createDummyResources() {
+        // Dummy Buffer (16 bytes)
+        VkBufferCreateInfo bufInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        bufInfo.size = 16;
+        bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        VmaAllocationCreateInfo allocInfo{ .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE };
+        vmaCreateBuffer(m_allocator, &bufInfo, &allocInfo, &m_dummyBuffer, &m_dummyBufferAlloc, nullptr);
+
+        // Dummy Image (1x1)
+        VkImageCreateInfo imgInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        imgInfo.imageType = VK_IMAGE_TYPE_2D;
+        imgInfo.extent = {1, 1, 1};
+        imgInfo.mipLevels = 1;
+        imgInfo.arrayLayers = 1;
+        imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+        imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        imgInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+        imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        vmaCreateImage(m_allocator, &imgInfo, &allocInfo, &m_dummyImage, &m_dummyImageAlloc, nullptr);
+
+        VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        viewInfo.image = m_dummyImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+        viewInfo.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        vkCreateImageView(m_device, &viewInfo, nullptr, &m_dummyImageView);
+
+        VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+        vkCreateSampler(m_device, &samplerInfo, nullptr, &m_dummySampler);
+    }
 
     VulkanDevice::~VulkanDevice(){
         enqueueDeletion([&samplers = m_samplers, device = m_device]() {
@@ -350,20 +396,18 @@ namespace rhi::vk{
                 }
             }
         });
-        // 1. 全てのGPU処理が終わるまで安全に待機
         vkDeviceWaitIdle(m_device);
         
-        // 2. マネージャ系の破棄（内部で保持しているCommandList等のフェンスもここで安全に破棄される）
         m_constantBufferManager.reset();
         m_uploadManager.reset();
-        m_pipelineCache.reset(); 
+        m_pipelineCacheManager.reset(); 
         m_shaderCache.reset();
-        // 3. 削除キューに溜まっている遅延破棄タスク(画像やバッファなど)をすべて強制実行してクリーンアップ
+        
         for (auto& entry : m_deletionQueue) {
             entry.func();
         }
         m_deletionQueue.clear();
-        // 4. FIF用フェンスの破棄（エラーの原因だった部分）
+        
         for (VkFence fence : m_inFlightFences) {
             if (fence != VK_NULL_HANDLE) {
                 vkDestroyFence(m_device, fence, nullptr);
@@ -375,7 +419,29 @@ namespace rhi::vk{
             vkDestroySemaphore(m_device, sem, nullptr);
         }
         m_semaphorePool.clear();
-        // 5. Vulkanコアオブジェクトの破棄
+
+        // --- ダミーリソースの破棄 ---
+        if (m_dummySampler) vkDestroySampler(m_device, m_dummySampler, nullptr);
+        if (m_dummyImageView) vkDestroyImageView(m_device, m_dummyImageView, nullptr);
+        if (m_dummyImage) vmaDestroyImage(m_allocator, m_dummyImage, m_dummyImageAlloc);
+        if (m_dummyBuffer) vmaDestroyBuffer(m_allocator, m_dummyBuffer, m_dummyBufferAlloc);
+
+        // --- Pipeline Cache の保存と破棄 ---
+        if (m_pipelineCache) {
+            size_t cacheSize = 0;
+            vkGetPipelineCacheData(m_device, m_pipelineCache, &cacheSize, nullptr);
+            if (cacheSize > 0) {
+                std::vector<char> cacheData(cacheSize);
+                vkGetPipelineCacheData(m_device, m_pipelineCache, &cacheSize, cacheData.data());
+                std::ofstream cacheFile(SHADER_CACHE_FILE_NAME, std::ios::binary);
+                if (cacheFile.is_open()) {
+                    cacheFile.write(cacheData.data(), cacheSize);
+                    cacheFile.close();
+                }
+            }
+            vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
+        }
+
         if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
         if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
         if (m_allocator) vmaDestroyAllocator(m_allocator);
@@ -399,91 +465,128 @@ namespace rhi::vk{
         }
         return m_nextIndex++;
     }
-    void VulkanDevice::unregisterIndex(uint32_t index) {
+
+    void VulkanDevice::flushDescriptorUpdates() {
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        if (!m_pendingWrites.empty()) {
+            vkUpdateDescriptorSets(m_device, m_pendingWrites.size(), m_pendingWrites.data(), 0, nullptr);
+            m_pendingWrites.clear();
+            m_pendingBufferInfos.clear();
+            m_pendingImageInfos.clear();
+        }
+    }
+
+    void VulkanDevice::unregisterIndex(uint32_t index, uint32_t binding) {
         std::lock_guard<std::mutex> lock(m_indexMutex);
         m_freeIndices.push_back(index);
+        
+        std::lock_guard<std::mutex> descLock(m_descriptorMutex);
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        write.dstSet = m_bindlessDescriptorSet;
+        write.dstBinding = binding;
+        write.dstArrayElement = index;
+        write.descriptorCount = 1;
+
+        if (binding == 0 || binding == 2) {
+            auto& info = m_pendingBufferInfos.emplace_back();
+            info.buffer = m_dummyBuffer;
+            info.offset = 0;
+            info.range = VK_WHOLE_SIZE;
+            write.descriptorType = (binding == 0) ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write.pBufferInfo = &info;
+        } else if (binding == 1 || binding == 3) {
+            auto& info = m_pendingImageInfos.emplace_back();
+            info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            info.imageView = m_dummyImageView;
+            info.sampler = VK_NULL_HANDLE;
+            write.descriptorType = (binding == 1) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            write.pImageInfo = &info;
+        } else if (binding == 4) {
+            auto& info = m_pendingImageInfos.emplace_back();
+            info.sampler = m_dummySampler;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+            write.pImageInfo = &info;
+        }
+        m_pendingWrites.push_back(write);
     }
     uint32_t VulkanDevice::registerBuffer(VkBuffer buffer, VkDeviceSize size) {
         uint32_t index = allocateIndex();
+        
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        auto& info = m_pendingBufferInfos.emplace_back();
+        info.buffer = buffer;
+        info.offset = 0;
+        info.range = size;
 
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = buffer;
-        bufferInfo.offset = 0;
-        bufferInfo.range = size;
-
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = m_bindlessDescriptorSet;
-        write.dstBinding = 0; // バッファ用のバインド番号
+        write.dstBinding = 0;
         write.dstArrayElement = index;
         write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         write.descriptorCount = 1;
-        write.pBufferInfo = &bufferInfo;
-
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        write.pBufferInfo = &info;
+        
+        m_pendingWrites.push_back(write);
         return index;
     }
 
     uint32_t VulkanDevice::registerImage(VkImageView view) {
         uint32_t index = allocateIndex();
 
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        imageInfo.imageView = view;
-        imageInfo.sampler = VK_NULL_HANDLE;
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        auto& info = m_pendingImageInfos.emplace_back();
+        info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        info.imageView = view;
+        info.sampler = VK_NULL_HANDLE;
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = m_bindlessDescriptorSet;
-        write.dstBinding = 1; // イメージ用のバインド番号
+        write.dstBinding = 1;
         write.dstArrayElement = index;
         write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         write.descriptorCount = 1;
-        write.pImageInfo = &imageInfo;
+        write.pImageInfo = &info;
 
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        m_pendingWrites.push_back(write);
         return index;
     }
     void VulkanDevice::createBindlessResources() {
-
-        // 1. レイアウトフラグの設定
         VkDescriptorBindingFlags flags = 
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | 
             VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
 
         VkDescriptorSetLayoutBindingFlagsCreateInfoEXT bindingFlags{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT };
         std::vector<VkDescriptorBindingFlags> allFlags = {
-            flags, flags, flags, flags, // Binding 0~3
-            flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT // Binding 4 (Sampler)
+            flags, flags, flags, flags,
+            flags | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
         };
         bindingFlags.bindingCount = 5;
         bindingFlags.pBindingFlags = allFlags.data();
 
         VkDescriptorSetLayoutBinding bindings[5] = {};
-        // Binding 0: Storage Buffers
         bindings[0].binding = 0;
         bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[0].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[0].stageFlags = VK_SHADER_STAGE_ALL;
-        // Binding 1: Storage Images
+        
         bindings[1].binding = 1;
         bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         bindings[1].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[1].stageFlags = VK_SHADER_STAGE_ALL;
-        // Binding 2: Uniform Buffers
+        
         bindings[2].binding = 2;
         bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         bindings[2].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[2].stageFlags = VK_SHADER_STAGE_ALL;
-        // Binding 3: Sampled Images
+        
         bindings[3].binding = 3;
         bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         bindings[3].descriptorCount = MAX_BINDLESS_RESOURCES;
         bindings[3].stageFlags = VK_SHADER_STAGE_ALL;
-        // Binding 4: Samplers
+        
         bindings[4].binding = 4;
         bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        bindings[4].descriptorCount = 32; // サンプラーは少数で十分
+        bindings[4].descriptorCount = 32;
         bindings[4].stageFlags = VK_SHADER_STAGE_ALL;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -495,7 +598,6 @@ namespace rhi::vk{
 
         VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_bindlessLayout));
 
-        //  プールの作成とセットの割り当て（UPDATE_AFTER_BIND フラグ
         std::vector<VkDescriptorPoolSize> poolSizes = {
             { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_BINDLESS_RESOURCES },
             { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_BINDLESS_RESOURCES},
@@ -511,17 +613,15 @@ namespace rhi::vk{
         poolInfo.maxSets = 1;
         vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_bindlessPool);
 
-        // ディスクリプタセットの割り当て
-        // 可変長配列（Variable Descriptor Count）を使用する場合 pNext で最大数を指定する必要があり
         uint32_t maxBindingCounts[5] = { MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, MAX_BINDLESS_RESOURCES, 32 };
         VkDescriptorSetVariableDescriptorCountAllocateInfo variableCountInfo{};
         variableCountInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
         variableCountInfo.descriptorSetCount = 1;
-        variableCountInfo.pDescriptorCounts = &maxBindingCounts[4]; // 最後のバインディング(UBO)の最大数
+        variableCountInfo.pDescriptorCounts = &maxBindingCounts[4];
 
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.pNext = &variableCountInfo; //可変長配列の設定を渡す
+        allocInfo.pNext = &variableCountInfo;
         allocInfo.descriptorPool = m_bindlessPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &m_bindlessLayout;
@@ -531,95 +631,91 @@ namespace rhi::vk{
 
     uint32_t VulkanDevice::registerUniformBuffer(VkBuffer buffer, VkDeviceSize size) {
         uint32_t index = allocateIndex();
-        VkDescriptorBufferInfo bufferInfo{ buffer, 0, size };
+        
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        auto& info = m_pendingBufferInfos.emplace_back();
+        info.buffer = buffer;
+        info.offset = 0;
+        info.range = size;
+
         VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = m_bindlessDescriptorSet;
         write.dstBinding = 2;
         write.dstArrayElement = index;
         write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         write.descriptorCount = 1;
-        write.pBufferInfo = &bufferInfo;
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        write.pBufferInfo = &info;
+
+        m_pendingWrites.push_back(write);
         return index;
     }
 
     uint32_t VulkanDevice::registerSampledImage(VkImageView view) {
-        uint32_t index = allocateIndex(); // 既存のインデックスアロケータを利用
+        uint32_t index = allocateIndex();
 
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // サンプリング用レイアウト
-        imageInfo.imageView = view;
-        imageInfo.sampler = VK_NULL_HANDLE; // アプローチBのためサンプラーは結合しない
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        auto& info = m_pendingImageInfos.emplace_back();
+        info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        info.imageView = view;
+        info.sampler = VK_NULL_HANDLE;
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = m_bindlessDescriptorSet;
-        write.dstBinding = 3; // Binding 3: Sampled Images
+        write.dstBinding = 3;
         write.dstArrayElement = index;
         write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         write.descriptorCount = 1;
-        write.pImageInfo = &imageInfo;
+        write.pImageInfo = &info;
 
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        m_pendingWrites.push_back(write);
         return index;
     }
 
     uint32_t VulkanDevice::registerSampler(VkSampler sampler) {
         uint32_t index = allocateIndex();
 
-        VkDescriptorImageInfo samplerInfo{};
-        samplerInfo.sampler = sampler;
+        std::lock_guard<std::mutex> lock(m_descriptorMutex);
+        auto& info = m_pendingImageInfos.emplace_back();
+        info.sampler = sampler;
 
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         write.dstSet = m_bindlessDescriptorSet;
-        write.dstBinding = 4; // Binding 4: Samplers
+        write.dstBinding = 4;
         write.dstArrayElement = index;
         write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         write.descriptorCount = 1;
-        write.pImageInfo = &samplerInfo;
+        write.pImageInfo = &info;
 
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        m_pendingWrites.push_back(write);
         return index;
     }
 
     uint32_t VulkanDevice::getStaticSampler(StringHash nameHash) const {
         auto it = m_staticSamplers.find(nameHash);
         if (it == m_staticSamplers.end()) {
-            // 見つからない場合はデフォルトとして LinearRepeat(最初に登録したもの) のインデックスを返す
             return m_staticSamplers.at("LinearRepeat"_hash);
         }
         return it->second;
     }
 
     VkQueue VulkanDevice::getQueue(QueueType type) const {
-        // Todo 将来GraphicsやCopyも対応する場合はtypeに応じて適切なキューを返すようにする
-        if (type == QueueType::Graphics) {
-            return m_graphicsQueue;
-        }
+        if (type == QueueType::Graphics) return m_graphicsQueue;
         return m_computeQueue;
     }
     
     uint32_t VulkanDevice::getQueueFamilyIndex(QueueType type) const {
-        if (type == QueueType::Graphics) {
-            return m_graphicsQueueFamilyIndex;
-        }
+        if (type == QueueType::Graphics) return m_graphicsQueueFamilyIndex;
         return m_computeQueueFamilyIndex;
     }
 
     VkSemaphore VulkanDevice::requestSemaphore() {
         std::lock_guard<std::mutex> lock(m_semaphoreMutex);
-        
-        // プールに空きがあれば再利用
         if (!m_semaphorePool.empty()) {
             VkSemaphore sem = m_semaphorePool.back();
             m_semaphorePool.pop_back();
             return sem;
         }
-
-        // プールが空なら新規作成
-        VkSemaphoreCreateInfo info{};
-        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkSemaphoreCreateInfo info{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VkSemaphore sem;
         VK_CHECK(vkCreateSemaphore(m_device, &info, nullptr, &sem));
         return sem;
@@ -649,7 +745,6 @@ namespace rhi::vk{
 
     void VulkanDevice::releaseSemaphore(VkSemaphore semaphore) {
         if (semaphore == VK_NULL_HANDLE) return;
-        
         std::lock_guard<std::mutex> lock(m_semaphoreMutex);
         m_semaphorePool.push_back(semaphore); // プールに返却して次回以降使い回す
     }

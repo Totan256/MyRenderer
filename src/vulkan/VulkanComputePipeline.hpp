@@ -9,7 +9,7 @@ namespace rhi::vk{
     class VulkanComputePipeline {
     public:
         // コンストラクタでパイプライン構築まで行う
-        VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath, uint32_t pushContentsSize);
+        VulkanComputePipeline(VulkanDevice& device, const std::string& shaderPath, uint32_t pushContentsSize, VkPipelineCache cache);
         ~VulkanComputePipeline();
 
         // Vulkanハンドル取得
@@ -18,19 +18,18 @@ namespace rhi::vk{
         //VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
 
         uint32_t getPushContentsSize() const {return m_pushContentsSize;}
-        // ファイル読み込みヘルパー
-        static std::vector<uint32_t> readFile(const std::string& filename);
-        static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath, shaderc_shader_kind kind = shaderc_compute_shader);
+        // // ファイル読み込みヘルパー
+        // static std::vector<uint32_t> readFile(const std::string& filename);
+        // static std::vector<uint32_t> compileGLSLToSPIRV(const std::string& shaderPath, shaderc_shader_kind kind = shaderc_compute_shader);
     private:
         VulkanDevice& m_device; // デバイスへの参照を保持
         const uint32_t m_pushContentsSize;
         
         VkPipeline m_pipeline = VK_NULL_HANDLE;
         VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-        //VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
         VkShaderModule m_shaderModule = VK_NULL_HANDLE;
 
 
-        void createPipeline(const std::string& shaderPath);
+        void createPipeline(const std::string& shaderPath,  VkPipelineCache cache = VK_NULL_HANDLE);
     };
 }

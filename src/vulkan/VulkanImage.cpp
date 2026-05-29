@@ -1,10 +1,10 @@
-﻿
-#include <vulkan/vulkan.h>
+﻿#include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include "VulkanDevice.hpp"
-// #include "VulkanCommandList.hpp"
 #include "VulkanImage.hpp"
 #include "VulkanSync.hpp"
+#include <stdexcept>
+
 namespace rhi::vk{
     VulkanImage::VulkanImage(VulkanDevice& device, const ImageDesc& desc, VkImageUsageFlags usage)
         : m_device(device), m_desc(desc) {
@@ -17,24 +17,20 @@ namespace rhi::vk{
         imageInfo.extent.depth = m_desc.depth;
         imageInfo.mipLevels = m_desc.mipLevels;
         imageInfo.arrayLayers = m_desc.arrayLayers;
-        imageInfo.format = mapFormat(m_desc.format); // RGBA 8bit
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;  // GPU最適化配置
+        imageInfo.format = mapFormat(m_desc.format); 
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;  
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        
-        // USAGE: Storage(書き込み), TransferSrc(コピー元), Sampled(テクスチャとして読む)
         imageInfo.usage = usage;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        // VMA割り当て
         VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; // VRAMに配置
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE; 
         if(vmaCreateImage(device.getAllocator(), &imageInfo, &allocInfo,
             &m_image, &m_allocation, nullptr) != VK_SUCCESS){
             throw std::runtime_error("failed to create image");
         }
 
-        // image view　shaderから見た設定
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = m_image;
@@ -51,7 +47,7 @@ namespace rhi::vk{
             throw std::runtime_error("failed to create image view");
         }
 
-        m_bindlessIndex = device.registerImage(m_view);
+        m_bindlessIndex = device.registerImage(m_view); // Binding 1: StorageImage として登録
     }
 
     VulkanImage::~VulkanImage(){
@@ -65,7 +61,7 @@ namespace rhi::vk{
         for (auto const& [mip, mipView] : m_mipViews) {
             if (mipView != VK_NULL_HANDLE) mipViewsToDestroy.push_back(mipView);
         }
-        // デバイスの参照をキャプチャし、遅延破棄を登録
+        
         m_device.enqueueDeletion([&device = m_device, image, view, alloc, bindlessIdx, bindlessSampledIdx, mipViewsToDestroy]() {
             VkDevice logicalDevice = device.getDevice();
 
@@ -73,8 +69,11 @@ namespace rhi::vk{
                 vkDestroyImageView(logicalDevice, mipView, nullptr);
             }
             if (view != VK_NULL_HANDLE) {
-                device.unregisterIndex(bindlessIdx);
-                vkDestroyImageView(device.getDevice(), view, nullptr);
+                device.unregisterIndex(bindlessIdx, 1); // 1 = StorageImage
+                if (bindlessSampledIdx != 0) {
+                    device.unregisterIndex(bindlessSampledIdx, 3); // 3 = SampledImage
+                }
+                vkDestroyImageView(logicalDevice, view, nullptr);
             }
             if (image != VK_NULL_HANDLE) {
                 vmaDestroyImage(device.getAllocator(), image, alloc);
@@ -90,7 +89,6 @@ namespace rhi::vk{
 
     void VulkanImage::recordMipmapGenerationCmds(VkCommandBuffer cmd) {
         if (m_desc.mipLevels <= 1) {
-            // ミップマップ生成が不要な場合でも、最終的なテクスチャ読み込みレイアウトへ遷移させる
             VkImageMemoryBarrier barrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
             barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -188,7 +186,7 @@ namespace rhi::vk{
         viewInfo.format = mapFormat(m_desc.format);
         viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         viewInfo.subresourceRange.baseMipLevel = mipLevel;
-        viewInfo.subresourceRange.levelCount = 1;      // 1レベルだけを対象にする
+        viewInfo.subresourceRange.levelCount = 1;     
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
 

@@ -1,11 +1,12 @@
 ﻿#include "VulkanCache.hpp"
+#include "utils/ShaderCompiler.hpp"
 
 namespace rhi::vk {
     const ShaderData& VulkanShaderCache::getOrCreateShader(const std::string& path, shaderc_shader_kind kind) {
         if (m_cache.find(path) == m_cache.end()) {
             ShaderData data;
             // ※ VulkanComputePipeline::compileGLSLToSPIRV などを再利用
-            data.spirv = VulkanComputePipeline::compileGLSLToSPIRV(path, kind);
+            data.spirv = ShaderCompiler::compileGLSLToSPIRV(path, kind);
             data.reflection = ShaderReflection::reflect(data.spirv);
             m_cache[path] = std::move(data);
         }
@@ -14,7 +15,8 @@ namespace rhi::vk {
 
     VulkanComputePipeline* VulkanPipelineCache::getOrCreateComputePipeline(const std::string& shaderPath, uint32_t pushContentsSize){
         if (m_computePipelines.find(shaderPath) == m_computePipelines.end()) {
-            m_computePipelines[shaderPath] = std::make_unique<VulkanComputePipeline>(m_device, shaderPath, pushContentsSize);
+            m_computePipelines[shaderPath] = std::make_unique<VulkanComputePipeline>(
+                m_device, shaderPath, pushContentsSize, m_device.getPipelineCache());
         }
         return m_computePipelines[shaderPath].get();
     }
@@ -30,7 +32,7 @@ namespace rhi::vk {
 
         if (m_graphicsPipelines.find(key) == m_graphicsPipelines.end()) {
             m_graphicsPipelines[key] = std::make_unique<VulkanGraphicsPipeline>(
-                m_device, vertPath, fragPath, colorFormats, depthFormat, pushContentsSize);
+                m_device, vertPath, fragPath, colorFormats, depthFormat, pushContentsSize, m_device.getPipelineCache());
         }
         return m_graphicsPipelines[key].get();
     }

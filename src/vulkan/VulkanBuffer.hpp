@@ -51,6 +51,7 @@ namespace rhi::vk{
         void* m_mappedPtr;
         bool m_isPersistentlyMapped = false;
         uint32_t m_bindlessIndex;
+        uint32_t m_bindlessBinding = 0;
     };
 
 }
