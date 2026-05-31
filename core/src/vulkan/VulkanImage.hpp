@@ -9,6 +9,7 @@ namespace rhi::vk{
     class VulkanImage : public rhi::Image {
     public:
         VulkanImage(VulkanDevice& device, const ImageDesc& desc, VkImageUsageFlags usage);
+        VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent);
         ~VulkanImage() override;
         // コピー禁止
         VulkanImage(const VulkanImage&) = delete;
@@ -46,6 +47,7 @@ namespace rhi::vk{
         uint32_t m_bindlessIndex = 0;
         uint32_t m_bindlessSampledIndex = 0;
         std::map<uint32_t, VkImageView> m_mipViews;
+        bool m_isOwned = true;
     };
 
 }

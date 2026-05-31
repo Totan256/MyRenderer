@@ -50,19 +50,35 @@ namespace rhi::vk{
         m_bindlessIndex = device.registerImage(m_view); // Binding 1: StorageImage として登録
     }
 
+    VulkanImage::VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent)
+        : m_device(device), m_image(existingImage), m_isOwned(false) // 所有権は持たない
+    {
+        // 必要に応じてImageDescのダミー値を埋める（RenderGraph等でサイズを参照できるようにするため）
+        m_desc.width = extent.width;
+        m_desc.height = extent.height;
+        m_desc.depth = extent.depth;
+        // format は ImageDesc の型 (rhi::Format) に変換して入れるか、必要に応じて保持
+        
+        // ※注意: スワップチェーン画像用の VkImageView をここで作成する処理が必要になる場合があります
+        // (通常は VkImageViewCreateInfo を使って m_view を作成します)
+    }
+
     VulkanImage::~VulkanImage(){
         VkImage image = m_image;
         VkImageView view = m_view;
         VmaAllocation alloc = m_allocation;
         uint32_t bindlessIdx = m_bindlessIndex;
         uint32_t bindlessSampledIdx = m_bindlessSampledIndex;
+        bool isOwned = m_isOwned;
         
         std::vector<VkImageView> mipViewsToDestroy;
         for (auto const& [mip, mipView] : m_mipViews) {
             if (mipView != VK_NULL_HANDLE) mipViewsToDestroy.push_back(mipView);
         }
         
-        m_device.enqueueDeletion([&device = m_device, image, view, alloc, bindlessIdx, bindlessSampledIdx, mipViewsToDestroy]() {
+        m_device.enqueueDeletion([&device = m_device, image, view, alloc, 
+                bindlessIdx, bindlessSampledIdx, mipViewsToDestroy, isOwned]()
+        {
             VkDevice logicalDevice = device.getDevice();
 
             for (VkImageView mipView : mipViewsToDestroy) {
@@ -75,7 +91,7 @@ namespace rhi::vk{
                 }
                 vkDestroyImageView(logicalDevice, view, nullptr);
             }
-            if (image != VK_NULL_HANDLE) {
+            if (isOwned && image != VK_NULL_HANDLE) {
                 vmaDestroyImage(device.getAllocator(), image, alloc);
             }
         });

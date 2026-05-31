@@ -65,6 +65,7 @@ namespace rhi::vk{
         VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
         VmaAllocator getAllocator() const { return m_allocator; }
         VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
+        VkInstance getInstance() const { return m_instance; }
         
         // キューの取得
         VkQueue getQueue(QueueType type) const;
