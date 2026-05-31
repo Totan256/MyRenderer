@@ -18,6 +18,7 @@ find_package(spirv_cross_glsl CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(lodepng CONFIG REQUIRED)
 find_package(unofficial-shaderc CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 
 add_subdirectory(core)
 add_subdirectory(apps)

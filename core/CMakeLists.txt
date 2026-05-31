@@ -31,6 +31,7 @@ target_link_libraries(RendererCore
         Vulkan::Vulkan
         glm::glm
         GPUOpen::VulkanMemoryAllocator
+        glfw
     PRIVATE
         spirv-cross-core
         spirv-cross-glsl
