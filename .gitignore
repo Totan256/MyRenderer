@@ -5,7 +5,9 @@
 
 # IDEやビルドツールの設定ファイル
 /assets/
-/workspace/
+!assets/.gitkeep
+workspace/*
+!workspace/.gitkeep
 
 # Prerequisites
 *.d

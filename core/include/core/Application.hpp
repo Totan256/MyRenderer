@@ -37,6 +37,7 @@ public:
 
     bool isRunning() const;
     void processEvents();
+    void requestRedraw();
     
     // --- 変更後のフレーム管理 ---
     // 描画不可能な状態（最小化やリサイズ中）の場合は std::nullopt を返す
@@ -45,11 +46,11 @@ public:
 
     // イメージインデックスから対応するバックバッファを取得する
     rhi::Image* getBackImage(uint32_t imageIndex);
-
-    void requestRedraw();
-
     rhi::Device& getDevice() { return *m_device; }
+
     float getDeltaTime() const { return m_deltaTime; }
+    uint32_t getWidth() const;
+    uint32_t getHeight() const;
 
 protected:
     virtual void onResize(uint32_t width, uint32_t height) {}
