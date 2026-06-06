@@ -28,22 +28,22 @@ namespace rhi::vk {
     };
 
     namespace {
-        void CollectRequirements(
-            rhi::RenderPass* pass,
-            const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
-            std::set<rhi::ResourceHandle>& seenHandles,
-            rhi::ShaderStage stage) 
-        {
-            const auto& signature = pass->getSignature();
-            for (const auto& [offset, handle] : resourceOffsets) {
-                auto it = signature.find(offset);
-                if (it != signature.end()) {
-                    if (seenHandles.insert(handle).second) {
-                        pass->addRequirement(handle, it->second, stage);
-                    }
-                }
-            }
-        }
+        // void CollectRequirements(
+        //     rhi::RenderPass* pass,
+        //     const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
+        //     std::set<rhi::ResourceHandle>& seenHandles,
+        //     rhi::ShaderStage stage) 
+        // {
+        //     const auto& signature = pass->getSignature();
+        //     for (const auto& [offset, handle] : resourceOffsets) {
+        //         auto it = signature.find(offset);
+        //         if (it != signature.end()) {
+        //             if (seenHandles.insert(handle).second) {
+        //                 pass->addRequirement(handle, it->second, stage);
+        //             }
+        //         }
+        //     }
+        // }
 
         struct PushConstantPack {
             std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> data{};
@@ -89,12 +89,13 @@ namespace rhi::vk {
             m_localSizeZ = shaderData.reflection.localSizeZ;
             m_pushConstantOffsets = shaderData.reflection.pushConstantOffsets;
         }
+    protected:
         void compile(Device& device) override {
             auto& vkDevice = static_cast<VulkanDevice&>(device);
             m_pipeline = vkDevice.getPipelineCacheManager().getOrCreateComputePipeline(m_shaderPath, MAX_PUSH_CONSTANT_SIZE);
             std::set<ResourceHandle> seenHandles;
             for (const auto& dsp : m_dispatches) {
-                CollectRequirements(this, dsp.m_resourceOffsets, seenHandles, ShaderStage::Compute);
+                CollectRequirements(dsp.m_resourceOffsets, seenHandles, ShaderStage::Compute);
             }
         }
         void execute(CommandList& cmdList) override {
@@ -125,6 +126,7 @@ namespace rhi::vk {
             m_pushConstantOffsets = vertData.reflection.pushConstantOffsets;
             m_outputLocations = fragData.reflection.outputLocations;
         }
+    protected:
         void compile(Device& device) override {
             auto& vkDevice = static_cast<VulkanDevice&>(device);
             auto& graph = static_cast<VulkanRenderGraph&>(m_graph);
@@ -152,10 +154,11 @@ namespace rhi::vk {
                 m_vertShaderPath, m_fragShaderPath, vkColorFormats, vkDepthFormat, MAX_PUSH_CONSTANT_SIZE);
             std::set<ResourceHandle> seenHandles;
             for (const auto& draw : m_draws) {
-                CollectRequirements(this, draw.m_resourceOffsets, seenHandles, ShaderStage::AllGraphics);
-                if (draw.m_isIndirect) {
-                    addRequirement(draw.m_indirectBuffer, ResourceState::StorageRead, ShaderStage::DrawIndirect);
-                    addRequirement(draw.m_countBuffer, ResourceState::StorageRead, ShaderStage::DrawIndirect);
+                CollectRequirements(draw.m_resourceOffsets, seenHandles, ShaderStage::AllGraphics);
+                auto state = draw.getState();
+                if (state.isIndirect) {
+                    addRequirement(state.indirectBuffer, ResourceState::StorageRead, ShaderStage::DrawIndirect);
+                    addRequirement(state.countBuffer, ResourceState::StorageRead, ShaderStage::DrawIndirect);
                 }
             }
         }
@@ -200,17 +203,18 @@ namespace rhi::vk {
 
                 auto& vkDevice = static_cast<VulkanDevice&>(m_graph.getDevice());
                 auto& vkGraph = static_cast<VulkanRenderGraph&>(m_graph);
-                for (auto& state : m_draws) {
-                    auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms);
+                for (auto& draw : m_draws) {
+                    auto pack = BuildPushConstants(vkGraph, vkDevice, draw.m_resourceOffsets, draw.m_dynamicUniforms);
                     if (pack.size > 0) {
                         vkCmdPushConstants(cmdBuf, m_pipeline->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pack.size, pack.data.data());
                     }
-                    if (state.m_isIndirect) {
-                        VkBuffer indirectBuf = allocator.getPhysicalBuffer(state.m_indirectBuffer)->getNativeBuffer();
-                        VkBuffer countBuf = allocator.getPhysicalBuffer(state.m_countBuffer)->getNativeBuffer();
-                        vkCmd.drawIndexedIndirectCount(indirectBuf, state.m_indirectOffset, countBuf, state.m_countOffset, state.m_maxDrawCount);
+                    auto state = draw.getState();
+                    if (state.isIndirect) {
+                        VkBuffer indirectBuf = allocator.getPhysicalBuffer(state.indirectBuffer)->getNativeBuffer();
+                        VkBuffer countBuf = allocator.getPhysicalBuffer(state.countBuffer)->getNativeBuffer();
+                        vkCmd.drawIndexedIndirectCount(indirectBuf, state.indirectOffset, countBuf, state.countOffset, state.maxDrawCount);
                     } else {
-                        vkCmd.draw(state.m_vertexCount, state.m_instanceCount, state.m_firstVertex, state.m_firstInstance);
+                        vkCmd.draw(state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
                     }
                 }
                 vkCmd.endRendering();
@@ -400,7 +404,7 @@ namespace rhi::vk {
         }
 
         // 1. Collect Requirements
-        for (auto& pass : m_passes) pass->compile(m_device);
+        for (auto& pass : m_passes) compilePass(pass.get(), m_device);
 
         std::vector<uint32_t> passIndices(m_passes.size());
         std::iota(passIndices.begin(), passIndices.end(), 0);
@@ -668,7 +672,7 @@ namespace rhi::vk {
             }
 
             for (uint32_t passIdx : batch.passIndices) {
-                m_passes[passIdx]->execute(*batch.cmdList);
+                executePass(m_passes[passIdx].get(), *batch.cmdList);
             }
 
             batch.cmdList->end();

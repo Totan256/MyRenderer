@@ -6,6 +6,7 @@
 #include <functional>
 #include <variant>
 #include <map>
+#include <set>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -80,15 +81,31 @@ namespace rhi {
         const std::vector<ResourceHandle>& getResourceHandles() const { return m_resourceHandles; }
         const std::vector<ResourceRequirement>& getRequirements() const { return m_requirements; }
 
+
+
+    protected:
         void addRequirement(ResourceHandle handle, ResourceState state, ShaderStage stage) {
             m_resourceHandles.push_back(handle);
             m_requirements.push_back({0, state, stage});
         }
-
+        void CollectRequirements(
+            const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
+            std::set<rhi::ResourceHandle>& seenHandles,
+            rhi::ShaderStage stage) 
+        {
+            const auto& signature = this->getSignature();
+            for (const auto& [offset, handle] : resourceOffsets) {
+                auto it = signature.find(offset);
+                if (it != signature.end()) {
+                    if (seenHandles.insert(handle).second) {
+                        this->addRequirement(handle, it->second, stage);
+                    }
+                }
+            }
+        }
+        friend class RenderGraph;
         virtual void compile(Device& device) = 0;
         virtual void execute(CommandList& cmdList) = 0;
-
-    protected:
         std::string m_name;
         PassType m_type;
         QueueType m_queueType;
@@ -132,15 +149,6 @@ namespace rhi {
             return setResource(offset, handle);
         }
 
-        Derived& setUniformRaw(StringHash nameHash, const void* data, size_t size) {
-            auto it = m_pass.getPushConstantOffsets().find(nameHash);
-            if (it == m_pass.getPushConstantOffsets().end()) throw std::runtime_error("Uniform not found in shader push constants!");
-            auto& vec = m_dynamicUniforms[it->second];
-            vec.resize(size);
-            std::memcpy(vec.data(), data, size);
-            return static_cast<Derived&>(*this);
-        }
-
         template<typename T>
         Derived& setUniform(StringHash nameHash, const T& value) {
             static_assert(sizeof(T) % 16 == 0, "Uniform data must be 16-byte aligned");
@@ -155,6 +163,15 @@ namespace rhi {
         RenderGraph& m_graph;
 
     private:
+
+        Derived& setUniformRaw(StringHash nameHash, const void* data, size_t size) {
+            auto it = m_pass.getPushConstantOffsets().find(nameHash);
+            if (it == m_pass.getPushConstantOffsets().end()) throw std::runtime_error("Uniform not found in shader push constants!");
+            auto& vec = m_dynamicUniforms[it->second];
+            vec.resize(size);
+            std::memcpy(vec.data(), data, size);
+            return static_cast<Derived&>(*this);
+        }
         uint32_t resolveOffset(ResourceHandle handle);
     };
 
@@ -202,20 +219,24 @@ namespace rhi {
     class GraphicsPass;
     class GraphicsDraw : public ResourceBindingBuilder<GraphicsDraw, GraphicsPass> {
     public:
+        struct GraphicsDrawState {
+            uint32_t vertexCount, instanceCount, firstVertex, firstInstance;
+            ResourceHandle indirectBuffer = InvalidResource, countBuffer = InvalidResource;
+            size_t indirectOffset = 0, countOffset = 0;
+            uint32_t maxDrawCount = 0;
+            bool isIndirect = false;
+        };
         GraphicsDraw(GraphicsPass& pass, RenderGraph& graph, uint32_t vCount, uint32_t iCount, uint32_t firstV, uint32_t firstI)
-            : ResourceBindingBuilder(pass, graph), m_vertexCount(vCount), m_instanceCount(iCount), m_firstVertex(firstV), m_firstInstance(firstI) {}
+            : ResourceBindingBuilder(pass, graph), m_state({vCount, iCount, firstV, firstI}) {}
 
         GraphicsDraw& setIndirectParams(ResourceHandle indirectBuffer, size_t indirectOffset, ResourceHandle countBuffer, size_t countOffset, uint32_t maxDrawCount) {
-            m_isIndirect = true; m_indirectBuffer = indirectBuffer; m_indirectOffset = indirectOffset;
-            m_countBuffer = countBuffer; m_countOffset = countOffset; m_maxDrawCount = maxDrawCount;
+            m_state.isIndirect = true; m_state.indirectBuffer = indirectBuffer; m_state.indirectOffset = indirectOffset;
+            m_state.countBuffer = countBuffer; m_state.countOffset = countOffset; m_state.maxDrawCount = maxDrawCount;
             return *this;
         }
-
-        uint32_t m_vertexCount, m_instanceCount, m_firstVertex, m_firstInstance;
-        bool m_isIndirect = false;
-        ResourceHandle m_indirectBuffer = InvalidResource, m_countBuffer = InvalidResource;
-        size_t m_indirectOffset = 0, m_countOffset = 0;
-        uint32_t m_maxDrawCount = 0;
+        const GraphicsDrawState& getState() const { return m_state; }
+    protected:
+        GraphicsDrawState m_state;
     };
 
     class GraphicsPass : public RenderPass {
@@ -306,6 +327,8 @@ namespace rhi {
         virtual void execute(const std::vector<SemaphoreHandle>& waitSemaphores = {}) = 0;
 
     protected:
+        void compilePass(RenderPass* pass, Device& device) { pass->compile(device); }
+        void executePass(RenderPass* pass, CommandList& cmdList) { pass->execute(cmdList); }
         bool isWriteUsage(rhi::ResourceState state);
         std::vector<uint32_t> getSortPasses(std::vector<uint32_t> passIndices);
         void calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices);
