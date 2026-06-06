@@ -4,7 +4,7 @@
 /out/
 
 # IDEやビルドツールの設定ファイル
-/assets/
+/assets/*
 !assets/.gitkeep
 workspace/*
 !workspace/.gitkeep
