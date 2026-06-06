@@ -105,14 +105,15 @@ namespace core {
         glfwPollEvents();
     }
 
-    std::vector<const char*> Window::getRequiredVulkanExtensions() const {
+    std::vector<const char*> Window::getRequiredVulkanExtensions() {
+        if (s_GLFWWindowCount == 0) {
+            if (!glfwInit()) {
+                throw std::runtime_error("Failed to initialize GLFW for extensions!");
+            }
+            // エラーコールバックなどもここでセット
+        }
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-        
-        if (glfwExtensions == nullptr) {
-            throw std::runtime_error("GLFW failed to return required Vulkan extensions!");
-        }
-
         return std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
     }
 

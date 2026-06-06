@@ -45,7 +45,7 @@ namespace core {
         uint32_t getHeight() const { return m_height; }
         
         // RHI層へ渡すVulkan連携機能
-        std::vector<const char*> getRequiredVulkanExtensions() const;
+        static std::vector<const char*> getRequiredVulkanExtensions();
         GLFWwindow* getNativeHandle() const { return m_window; }
 
         // --- SHOULD (イベント駆動: バケツリレーの口) ---

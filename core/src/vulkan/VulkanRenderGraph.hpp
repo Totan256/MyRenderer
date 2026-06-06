@@ -4,6 +4,7 @@
 #include "VulkanBuffer.hpp"
 #include "vulkan/VulkanCommandList.hpp"
 #include "VulkanSync.hpp"
+#include "rhi/Swapchain.hpp"
 #include "VulkanResourceAllocator.hpp"
 #include <map>
 
@@ -18,6 +19,12 @@ namespace rhi::vk {
         
         std::vector<VkImageMemoryBarrier2> imageBarriers;
         std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+    };
+
+    struct SwapchainSync {
+        rhi::Swapchain* swapchain;
+        uint32_t firstBatchIdx;
+        uint32_t lastBatchIdx;
     };
 
     class VulkanRenderGraph : public RenderGraph {
@@ -42,6 +49,11 @@ namespace rhi::vk {
         void execute(const std::vector<SemaphoreHandle>& waitSemaphores) override;
 
     private:
+        struct SwapchainSync {
+            rhi::Swapchain* swapchain;
+            uint32_t firstBatchIdx;
+            uint32_t lastBatchIdx;
+        };
         VulkanDevice& m_device;
         VulkanResourceAllocator m_resourceAllocator;
         std::vector<uint32_t> m_sortedIndices;
@@ -49,6 +61,7 @@ namespace rhi::vk {
 
         std::vector<RenderBatch> m_batches;
         std::vector<VkSemaphore> m_batchSemaphores;
+        std::vector<SwapchainSync> m_swapchainSyncs;
 
         void clearBatchSemaphores();
     };

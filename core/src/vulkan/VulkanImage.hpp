@@ -4,12 +4,13 @@
 #include "VulkanDevice.hpp"
 #include "rhi/RHIcommon.hpp"
 #include "rhi/RHIForward.hpp"
+#include "rhi/Swapchain.hpp"
 
 namespace rhi::vk{
     class VulkanImage : public rhi::Image {
     public:
         VulkanImage(VulkanDevice& device, const ImageDesc& desc, VkImageUsageFlags usage);
-        VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent);
+        VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent, rhi::Swapchain* swapchain = nullptr);
         ~VulkanImage() override;
         // コピー禁止
         VulkanImage(const VulkanImage&) = delete;
@@ -27,6 +28,10 @@ namespace rhi::vk{
             m_state = state;
             m_stage = stage;
         }
+
+        bool isSwapchainImage() const override { return m_swapchain != nullptr; }
+        rhi::Swapchain* getSwapchain() const override { return m_swapchain; }
+
         bool isImage() const override { return true; }
         ImageDesc getDesc(){ return m_desc; }
         void recordMipmapGenerationCmds(VkCommandBuffer cmd);
@@ -38,6 +43,7 @@ namespace rhi::vk{
         VkImage m_image = VK_NULL_HANDLE;
         VkImageView m_view = VK_NULL_HANDLE;
         VmaAllocation m_allocation = VK_NULL_HANDLE;
+        rhi::Swapchain* m_swapchain = nullptr;
 
         ImageDesc m_desc;
         

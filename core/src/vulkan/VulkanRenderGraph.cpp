@@ -370,7 +370,7 @@ namespace rhi::vk {
     void VulkanRenderGraph::compile() {
         std::cout << "Compiling RenderGraph..." << std::endl;
         clearBatchSemaphores();
-        
+        m_swapchainSyncs.clear();   
         m_device.flushDescriptorUpdates();
 
         // 0. Auto Upload Passes
@@ -577,14 +577,43 @@ namespace rhi::vk {
             }
         }
         
-        // グラフ実行完了後の最終状態を物理リソースに記録し、次フレームで正しく引き継げるようにする
         for (const auto& [h, track] : currentStates) {
-            if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
-                m_resourceRegistry[h].physicalResource->setState(track.rhiState, track.rhiStage);
+            for (const auto& [h, track] : currentStates) {
+                const auto& reg = m_resourceRegistry[h];
+                if (reg.isImage() && reg.isImported && reg.physicalResource) {
+                    VulkanImage* physImg = static_cast<VulkanImage*>(reg.physicalResource);
+                    if (physImg->isSwapchainImage()) {
+                        rhi::Swapchain* swapchain = physImg->getSwapchain();                    
+                        // Lifetime情報から、このリソースに「最初に触れたパス」を特定
+                        uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
+                        uint32_t firstBatchIdx = passToBatch[firstPassIdx];
+                        uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];                    
+                        VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(h);                    
+                        // Present用のレイアウト(PRESENT_SRC_KHR)へ最終遷移させるバリアを作成
+                        VkImageMemoryBarrier2 presentBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                        presentBarrier.srcStageMask = track.state.stageMask; 
+                        presentBarrier.srcAccessMask = track.state.accessMask;
+                        presentBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // PresentはGPUの動作を待たない
+                        presentBarrier.dstAccessMask = VK_ACCESS_2_NONE;
+                        presentBarrier.oldLayout = track.state.layout; 
+                        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                        presentBarrier.srcQueueFamilyIndex = m_device.getQueueFamilyIndex(track.queueType);
+                        presentBarrier.dstQueueFamilyIndex = m_device.getQueueFamilyIndex(track.queueType); 
+                        presentBarrier.image = physImg->getImage();
+                        presentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };                    
+                        // 最後のバッチにバリアを追加
+                        m_batches[lastBatchIdx].imageBarriers.push_back(presentBarrier);                    
+                        // execute() でセマフォを注入するために記録
+                        m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
+                    }
+                }
+                // グラフ実行完了後の最終状態を物理リソースに記録し、次フレームで正しく引き継げるようにする
+                if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
+                    m_resourceRegistry[h].physicalResource->setState(track.rhiState, track.rhiStage);
+                }
             }
+            m_sortedIndices = sortedIndices;
         }
-        
-        m_sortedIndices = sortedIndices;
     }
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
@@ -592,7 +621,22 @@ namespace rhi::vk {
         std::vector<SemaphoreHandle> combinedWaitSems = waitSemaphores;
         combinedWaitSems.insert(combinedWaitSems.end(), asyncSems.begin(), asyncSems.end());
 
-        // --- 修正点2: バッチサブミット用の構造体 ---
+        for (const auto& sync : m_swapchainSyncs) {
+            VkSemaphore acquireSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentAcquireSemaphore());
+            VkSemaphore presentSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentPresentSemaphore());
+
+            if (acquireSem != VK_NULL_HANDLE) {
+                // 最初のバッチが実行される前に、画像が利用可能になるのを待つ
+                m_batches[sync.firstBatchIdx].waitSemaphores.push_back(acquireSem);
+                m_batches[sync.firstBatchIdx].waitStages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            }
+            if (presentSem != VK_NULL_HANDLE) {
+                // 最後のバッチが終わったら、表示用のセマフォをシグナルする
+                m_batches[sync.lastBatchIdx].signalSemaphores.push_back(presentSem);
+            }
+        }
+
+        // --- バッチサブミット用の構造体 ---
         struct SubmitBatch {
             VkQueue queue = VK_NULL_HANDLE;
             std::vector<VkSubmitInfo> submits;
@@ -677,7 +721,7 @@ namespace rhi::vk {
                 sb.submits[i].commandBufferCount = 1;
                 sb.submits[i].pCommandBuffers = &sb.cmdBuffers[i];
             }
-            // キューごとに1回だけ実行
+            // バッチごとに1回だけ実行
             VK_CHECK(vkQueueSubmit(sb.queue, (uint32_t)sb.submits.size(), sb.submits.data(), sb.fence));
         }
     }

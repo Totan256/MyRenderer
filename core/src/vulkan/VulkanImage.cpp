@@ -50,7 +50,7 @@ namespace rhi::vk{
         m_bindlessIndex = device.registerImage(m_view); // Binding 1: StorageImage として登録
     }
 
-    VulkanImage::VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent)
+    VulkanImage::VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent, rhi::Swapchain* swapchain)
         : m_device(device), m_image(existingImage), m_isOwned(false) // 所有権は持たない
     {
         // 必要に応じてImageDescのダミー値を埋める（RenderGraph等でサイズを参照できるようにするため）

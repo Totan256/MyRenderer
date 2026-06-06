@@ -136,7 +136,8 @@ namespace rhi::vk {
             // 必要になる場合があります (所有権を持たず、破棄時に vkDestroyImage を呼ばない設定)
             auto img = std::make_shared<VulkanImage>(
                 m_device, m_vkImages[i], m_format, 
-                VkExtent3D{m_extent.width, m_extent.height, 1}
+                VkExtent3D{m_extent.width, m_extent.height, 1},
+                this
             );
             m_images.push_back(img);
         }
@@ -177,23 +178,29 @@ namespace rhi::vk {
     }
 
     // --- メインループから呼ばれる関数 ---
-    bool VulkanSwapchain::acquireNextImage(VkSemaphore presentCompleteSemaphore, uint32_t& imageIndex) {
-        VkResult result = vkAcquireNextImageKHR(m_device.getDevice(), m_swapchain, std::numeric_limits<uint64_t>::max(), presentCompleteSemaphore, VK_NULL_HANDLE, &imageIndex);
+    bool VulkanSwapchain::acquireNextImage(VkSemaphore acquireSem, VkSemaphore presentSem, uint32_t& imageIndex) {
+        // レンダーグラフが後で取り出せるように記録
+        m_currentAcquireSemaphore = acquireSem;
+        m_currentPresentSemaphore = presentSem;
 
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            return false; // リサイズ等で再構築が必要
-        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            throw std::runtime_error("Failed to acquire swap chain image!");
-        }
+        VkResult result = vkAcquireNextImageKHR(
+            m_device.getDevice(), m_swapchain, 
+            std::numeric_limits<uint64_t>::max(), 
+            acquireSem, VK_NULL_HANDLE, &imageIndex
+        );
+
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) return false;
+        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) throw std::runtime_error("Failed to acquire swap chain image!");
+        
         return true;
     }
 
-    bool VulkanSwapchain::present(VkQueue presentQueue, uint32_t imageIndex, VkSemaphore waitSemaphore) {
+    bool VulkanSwapchain::present(VkQueue presentQueue, uint32_t imageIndex) {
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &waitSemaphore;
+        presentInfo.pWaitSemaphores = &m_currentPresentSemaphore; // キャッシュを使用
 
         VkSwapchainKHR swapchains[] = {m_swapchain};
         presentInfo.swapchainCount = 1;
@@ -202,11 +209,9 @@ namespace rhi::vk {
 
         VkResult result = vkQueuePresentKHR(presentQueue, &presentInfo);
 
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-            return false; // 再構築が必要
-        } else if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to present swap chain image!");
-        }
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) return false;
+        else if (result != VK_SUCCESS) throw std::runtime_error("Failed to present swap chain image!");
+        
         return true;
     }
 

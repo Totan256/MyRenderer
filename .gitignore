@@ -2,7 +2,10 @@
 /build/
 /.vscode/
 /out/
+
+# IDEやビルドツールの設定ファイル
 /assets/
+/workspace/
 
 # Prerequisites
 *.d
@@ -49,5 +52,3 @@
 # CMakeUserPresets
 CMakeUserPresets.json
 
-# image
-/image

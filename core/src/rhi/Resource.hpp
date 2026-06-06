@@ -4,6 +4,8 @@
 #include <cstdint>
 
 namespace rhi {
+    class Swapchain; // 前方宣言
+
     class Resource {
     public:
         virtual ~Resource() = default;
@@ -31,5 +33,8 @@ namespace rhi {
         virtual ~Image() = default;
         virtual uint32_t getBindlessIndex() const = 0;
         bool isImage() const override { return true; }
+    protected:
+        virtual bool isSwapchainImage() const { return false; }
+        virtual Swapchain* getSwapchain() const { return nullptr; }
     };
 }

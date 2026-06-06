@@ -1,7 +1,7 @@
 ﻿#include "VulkanDevice.hpp"
 #include "VulkanBuffer.hpp"
 #include "VulkanImage.hpp"
-
+#include "core/Window.hpp"
 #include "rhi/Resource.hpp"
 #include "RenderGraph.hpp"
 #include "VulkanRenderGraph.hpp"
@@ -162,9 +162,9 @@ namespace rhi::vk{
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
         createInfo.ppEnabledLayerNames = validationLayers.data();
         
-        const std::vector<const char*> extensions = {
-            VK_EXT_DEBUG_UTILS_EXTENSION_NAME
-        };
+        std::vector<const char*> extensions = core::Window::getRequiredVulkanExtensions();
+        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
 
@@ -320,7 +320,8 @@ namespace rhi::vk{
             VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,       // Dynamic Rendering
             VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME,  // EDS 1
             VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME,// EDS 2
-            VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME // EDS 3
+            VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,// EDS 3
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME
         };
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -389,6 +390,9 @@ namespace rhi::vk{
     }
 
     VulkanDevice::~VulkanDevice(){
+        if (m_device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(m_device);
+        }
         enqueueDeletion([&samplers = m_samplers, device = m_device]() {
             for (auto& [hash, sampler] : samplers) {
                 if (sampler != VK_NULL_HANDLE) {

@@ -4,6 +4,12 @@
 namespace rhi {
     using SemaphoreHandle = void*;// 同期用の抽象ハンドル
 
+    struct GraphSignal {
+        SemaphoreHandle compute;
+        SemaphoreHandle graphics;
+        SemaphoreHandle transfer; 
+    };
+
     enum class QueueType {
         Graphics,
         Compute,
