@@ -10,6 +10,7 @@ int main() {
         core::Window window("Sandbox", 800, 600);
 
         std::unique_ptr<rhi::Device> device = rhi::createDevice(rhi::GraphicsAPI::Vulkan);
+        device->initialize(window.getVulkanProvider()); 
 
         Renderer renderer(*device, 800, 600);
 

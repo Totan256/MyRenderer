@@ -11,7 +11,6 @@ namespace rhi {
             case GraphicsAPI::Vulkan: {
 #ifdef RHI_USE_VULKAN
                 auto device = std::make_unique<vk::VulkanDevice>();
-                device->initialize(); 
                 return device;
 #else
                 throw std::runtime_error("Vulkan is not enabled!");

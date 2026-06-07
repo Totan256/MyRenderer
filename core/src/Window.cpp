@@ -1,10 +1,12 @@
 ﻿#include "core/Window.hpp"
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <stdexcept>
 #include <iostream>
 
 namespace core {
+
 
     // 複数ウィンドウを作成した場合でもGLFWの初期化・破棄を正しく行うためのカウンタ
     static int s_GLFWWindowCount = 0;
@@ -79,6 +81,18 @@ namespace core {
                 data->eventCallback(event);
             }
         });
+
+        // vulkanProviderの初期化
+        if (s_GLFWWindowCount == 0) {
+            if (!glfwInit()) {
+                throw std::runtime_error("Failed to initialize GLFW for extensions!");
+            }
+            // エラーコールバックなどもここでセット
+        }
+        uint32_t glfwExtensionCount = 0;
+        const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+        m_vulkanProvider.vulkanExtensions = std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        m_vulkanProvider.nativeWindowHandle = m_window;
         
         // ※今後、必要に応じてキーボードやマウスのコールバックもここに追加していきます
     }
@@ -105,16 +119,23 @@ namespace core {
         glfwPollEvents();
     }
 
-    std::vector<const char*> Window::getRequiredVulkanExtensions() {
-        if (s_GLFWWindowCount == 0) {
-            if (!glfwInit()) {
-                throw std::runtime_error("Failed to initialize GLFW for extensions!");
-            }
-            // エラーコールバックなどもここでセット
+    // std::vector<const char*> Window::getRequiredVulkanExtensions() {
+    //     if (s_GLFWWindowCount == 0) {
+    //         if (!glfwInit()) {
+    //             throw std::runtime_error("Failed to initialize GLFW for extensions!");
+    //         }
+    //         // エラーコールバックなどもここでセット
+    //     }
+    //     uint32_t glfwExtensionCount = 0;
+    //     const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+    //     return std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
+    // }
+    void* Window::createVulkanSurface(void* vkInstance, void* nativeWindowHandle) {
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        if (glfwCreateWindowSurface(static_cast<VkInstance>(vkInstance), static_cast<GLFWwindow*>(nativeWindowHandle), nullptr, &surface) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create window surface!");
         }
-        uint32_t glfwExtensionCount = 0;
-        const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-        return std::vector<const char*>(glfwExtensions, glfwExtensions + glfwExtensionCount);
+        return static_cast<void*>(surface);
     }
 
     // --- SHOULD (入力ポーリング) ---

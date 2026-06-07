@@ -39,7 +39,7 @@ namespace rhi::vk{
         VulkanDevice& operator=(const VulkanDevice&) = delete;
 
         // 初期化
-        void initialize() override;
+        void initialize(const core::VulkanProvider provider = {}) override;
 
         // フレーム管理
         void beginFrame() override;
@@ -58,7 +58,7 @@ namespace rhi::vk{
         std::unique_ptr<Image> createImage(const ImageDesc& desc) override;
         std::unique_ptr<RenderGraph> createRenderGraph() override;
         std::unique_ptr<rhi::CommandList> createCommandList(QueueType queueType = QueueType::Compute) override;
-        
+        std::unique_ptr<rhi::Swapchain> createSwapchain(const core::Window& window, const SwapchainConfig& config = {}) override;
 
         // 生のハンドル取得（拡張性のため）
         VkDevice getDevice() const { return m_device; }
@@ -155,7 +155,7 @@ namespace rhi::vk{
         
         void createBindlessResources(); // 初期化時に呼ぶ
 
-        void createInstance();
+        void createInstance(std::vector<const char*> additionalExtensions = {});
         void pickPhysicalDevice();
         void createLogicalDevice();
         void createAllocator();
@@ -168,5 +168,6 @@ namespace rhi::vk{
 
         std::unique_ptr<VulkanShaderCache> m_shaderCache;
         std::unique_ptr<VulkanPipelineCache> m_pipelineCacheManager;
+        core::VulkanProvider m_provider;
     };
 }

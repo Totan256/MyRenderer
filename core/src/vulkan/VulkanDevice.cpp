@@ -10,6 +10,7 @@
 #include "VulkanCommandList.hpp"
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanUploadManager.hpp"
+#include "VulkanSwapchain.hpp"
 #include <iostream>
 #include <fstream>
 #include <set>
@@ -77,7 +78,12 @@ namespace rhi::vk{
     std::unique_ptr<rhi::CommandList> VulkanDevice::createCommandList(QueueType queueType) {
         return std::make_unique<VulkanCommandList>(*this, queueType);
     }
-    VulkanShaderCache& VulkanDevice::getShaderCache() { 
+    std::unique_ptr<rhi::Swapchain> VulkanDevice::createSwapchain(const core::Window& window, const SwapchainConfig& config) {
+        auto rawSurface = core::Window::createVulkanSurface(m_instance, m_provider.nativeWindowHandle);
+        VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(rawSurface);
+        return std::make_unique<VulkanSwapchain>(*this, surface, config, window);
+    }
+    VulkanShaderCache& VulkanDevice::getShaderCache() {
         return *m_shaderCache; 
     }
     
@@ -85,9 +91,10 @@ namespace rhi::vk{
         return *m_pipelineCacheManager; 
     }
 
-    void VulkanDevice::initialize(){
+    void VulkanDevice::initialize(const core::VulkanProvider provider){
+        m_provider = provider; // 後で必要になるので保存しておく
         std::cout << "--- Initializing VulkanDevice ---" << std::endl;
-        createInstance();
+        createInstance(provider.vulkanExtensions);
         pickPhysicalDevice();
 
         VkPhysicalDeviceProperties properties;
@@ -142,7 +149,7 @@ namespace rhi::vk{
         return m_uploadManager.get();
     }
 
-    void VulkanDevice::createInstance(){
+    void VulkanDevice::createInstance(std::vector<const char*> additionalExtensions){
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         appInfo.pApplicationName = "MyOfflineRenderer";
@@ -162,7 +169,7 @@ namespace rhi::vk{
         createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
         createInfo.ppEnabledLayerNames = validationLayers.data();
         
-        std::vector<const char*> extensions = core::Window::getRequiredVulkanExtensions();
+        std::vector<const char*> extensions = additionalExtensions;
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());

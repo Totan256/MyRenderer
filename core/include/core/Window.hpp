@@ -1,16 +1,25 @@
-﻿#include <string>
+﻿#pragma once
+#include <string>
 #include <vector>
 #include <functional>
 
 struct GLFWwindow;
 
 namespace core {
+    
     enum class EventType {
         None = 0,
         WindowClose, WindowResize,
         KeyPressed, KeyReleased,
         MouseButtonPressed, MouseButtonReleased, MouseMoved, MouseScrolled
     };
+
+    struct VulkanProvider {
+        std::vector<const char*> vulkanExtensions;
+        void* nativeWindowHandle = nullptr;
+        void* vulkanSurface = nullptr;
+    };
+
 
     struct Event {
         EventType type = EventType::None;
@@ -45,8 +54,10 @@ namespace core {
         uint32_t getHeight() const { return m_height; }
         
         // RHI層へ渡すVulkan連携機能
-        static std::vector<const char*> getRequiredVulkanExtensions();
-        GLFWwindow* getNativeHandle() const { return m_window; }
+        const VulkanProvider& getVulkanProvider() const { return m_vulkanProvider; }
+        // static std::vector<const char*> getRequiredVulkanExtensions();
+        static void* createVulkanSurface(void* vkInstance, void* nativeWindowHandle);
+        // GLFWwindow* getNativeHandle() const { return m_window; }
 
         // --- SHOULD (イベント駆動: バケツリレーの口) ---
         void setEventCallback(const EventCallbackFn& callback) { m_data.eventCallback = callback; }
@@ -69,6 +80,7 @@ namespace core {
         GLFWwindow* m_window = nullptr;
         uint32_t m_width;
         uint32_t m_height;
+        VulkanProvider m_vulkanProvider;
 
         // GLFWコールバックへ渡すための内部データ構造体
         struct WindowData {

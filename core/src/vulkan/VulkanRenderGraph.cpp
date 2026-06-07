@@ -632,7 +632,8 @@ namespace rhi::vk {
             if (acquireSem != VK_NULL_HANDLE) {
                 // 最初のバッチが実行される前に、画像が利用可能になるのを待つ
                 m_batches[sync.firstBatchIdx].waitSemaphores.push_back(acquireSem);
-                m_batches[sync.firstBatchIdx].waitStages.push_back(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                VkPipelineStageFlags waitStage = getWaitStageForQueue(m_batches[sync.firstBatchIdx].queueType);
+                m_batches[sync.firstBatchIdx].waitStages.push_back(waitStage);
             }
             if (presentSem != VK_NULL_HANDLE) {
                 // 最後のバッチが終わったら、表示用のセマフォをシグナルする

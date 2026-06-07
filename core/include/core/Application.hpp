@@ -7,6 +7,7 @@
 
 namespace rhi {
     class Device;
+    class Swapchain;
     class Image;
 }
 
@@ -42,11 +43,12 @@ public:
     // --- 変更後のフレーム管理 ---
     // 描画不可能な状態（最小化やリサイズ中）の場合は std::nullopt を返す
     std::optional<FrameInfo> beginFrame();
-    void endFrame();
+    void endFrame(uint32_t imageIndex);
 
     // イメージインデックスから対応するバックバッファを取得する
     rhi::Image* getBackImage(uint32_t imageIndex);
     rhi::Device& getDevice() { return *m_device; }
+    rhi::Swapchain& getSwapchain() { return *m_swapchain; }
 
     float getDeltaTime() const { return m_deltaTime; }
     uint32_t getWidth() const;
@@ -59,6 +61,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
     std::unique_ptr<rhi::Device> m_device;
+    std::unique_ptr<rhi::Swapchain> m_swapchain;
     AppMode m_mode;
     bool m_needsRedraw = true;
     float m_deltaTime = 0.0f;

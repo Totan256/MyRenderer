@@ -1,34 +1,25 @@
 ﻿#include "VulkanSwapchain.hpp"
 #include "VulkanDevice.hpp"
 #include "VulkanImage.hpp"
-#include <GLFW/glfw3.h>
 #include <stdexcept>
 #include <algorithm>
 #include <iostream>
 
 namespace rhi::vk {
 
-    VulkanSwapchain::VulkanSwapchain(VulkanDevice& device, GLFWwindow* window, const SwapchainConfig& config)
-        : m_device(device), m_window(window), m_config(config)
+    VulkanSwapchain::VulkanSwapchain(VulkanDevice& device, VkSurfaceKHR surface, const SwapchainConfig& config, const core::Window& window)
+        : m_device(device), m_surface(surface), m_config(config), m_window(window)
     {
-        initSurface();
         
         // 初回作成時のサイズ取得
-        int width, height;
-        glfwGetFramebufferSize(m_window, &width, &height);
-        create(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+        create(static_cast<uint32_t>(m_window.getWidth()), static_cast<uint32_t>(m_window.getHeight()));
+        m_presentQueue = m_device.getQueue(rhi::QueueType::Graphics); // todo Present用のキュー（通常はGraphicsと同じ）
     }
 
     VulkanSwapchain::~VulkanSwapchain() {
         cleanup();
         if (m_surface != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(m_device.getInstance(), m_surface, nullptr);
-        }
-    }
-
-    void VulkanSwapchain::initSurface() {
-        if (glfwCreateWindowSurface(m_device.getInstance(), m_window, nullptr, &m_surface) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create window surface!");
         }
     }
 
@@ -45,11 +36,11 @@ namespace rhi::vk {
     void VulkanSwapchain::recreate(uint32_t width, uint32_t height) {
         // 最小化時はサイズが0になるため、復帰するまで待機する
         int w = 0, h = 0;
-        glfwGetFramebufferSize(m_window, &w, &h);
-        while (w == 0 || h == 0) {
-            glfwGetFramebufferSize(m_window, &w, &h);
-            glfwWaitEvents();
-        }
+        // glfwGetFramebufferSize(m_window, &w, &h);
+        // while (w == 0 || h == 0) {
+        //     glfwGetFramebufferSize(m_window, &w, &h);
+        //     glfwWaitEvents();
+        // }
 
         vkDeviceWaitIdle(m_device.getDevice());
 
@@ -141,6 +132,17 @@ namespace rhi::vk {
             );
             m_images.push_back(img);
         }
+
+        // 初回作成時のみセマフォを確保
+        if (m_acquireSemaphores.empty()) {
+            m_acquireSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+            m_presentSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+            VkSemaphoreCreateInfo semInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+            for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+                vkCreateSemaphore(m_device.getDevice(), &semInfo, nullptr, &m_acquireSemaphores[i]);
+                vkCreateSemaphore(m_device.getDevice(), &semInfo, nullptr, &m_presentSemaphores[i]);
+            }
+        }
     }
 
     // --- ヘルパー関数群 ---
@@ -178,39 +180,38 @@ namespace rhi::vk {
     }
 
     // --- メインループから呼ばれる関数 ---
-    bool VulkanSwapchain::acquireNextImage(VkSemaphore acquireSem, VkSemaphore presentSem, uint32_t& imageIndex) {
-        // レンダーグラフが後で取り出せるように記録
-        m_currentAcquireSemaphore = acquireSem;
-        m_currentPresentSemaphore = presentSem;
+    bool VulkanSwapchain::acquireNextImage(uint32_t& imageIndex) {
+        uint32_t frameIdx = m_device.getCurrentFrame() % MAX_FRAMES_IN_FLIGHT;
+        
+        m_currentAcquireSemaphore = m_acquireSemaphores[frameIdx];
+        m_currentPresentSemaphore = m_presentSemaphores[frameIdx];
 
         VkResult result = vkAcquireNextImageKHR(
             m_device.getDevice(), m_swapchain, 
             std::numeric_limits<uint64_t>::max(), 
-            acquireSem, VK_NULL_HANDLE, &imageIndex
+            m_currentAcquireSemaphore, VK_NULL_HANDLE, &imageIndex
         );
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) return false;
-        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) throw std::runtime_error("Failed to acquire swap chain image!");
-        
+        else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) throw std::runtime_error("Failed to acquire!");
         return true;
     }
 
-    bool VulkanSwapchain::present(VkQueue presentQueue, uint32_t imageIndex) {
-        VkPresentInfoKHR presentInfo{};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-
+    bool VulkanSwapchain::present(uint32_t imageIndex) {
+        VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+        
+        // acquireNextImageで設定した現在のセマフォを待機
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &m_currentPresentSemaphore; // キャッシュを使用
+        presentInfo.pWaitSemaphores = &m_currentPresentSemaphore;
 
         VkSwapchainKHR swapchains[] = {m_swapchain};
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapchains;
         presentInfo.pImageIndices = &imageIndex;
-
-        VkResult result = vkQueuePresentKHR(presentQueue, &presentInfo);
+        VkResult result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) return false;
-        else if (result != VK_SUCCESS) throw std::runtime_error("Failed to present swap chain image!");
+        else if (result != VK_SUCCESS) throw std::runtime_error("Failed to present!");
         
         return true;
     }
