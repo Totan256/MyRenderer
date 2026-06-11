@@ -14,8 +14,7 @@ namespace core {
     struct Application::Impl {
         std::unique_ptr<core::Window> window;
         std::shared_ptr<rhi::Swapchain> swapchain;
-        
-        
+                
         uint32_t width = 1280;
         uint32_t height = 720;
         uint32_t currentImageIndex = 0;
@@ -79,6 +78,14 @@ namespace core {
         m_lastTimestamp = currentTimestamp;
     }
 
+    uint32_t Application::getWidth() const {
+        return m_impl->window->getWidth();
+    }
+
+    uint32_t Application::getHeight() const {
+        return m_impl->window->getHeight();
+    }
+
     void Application::requestRedraw() {
         m_needsRedraw = true;
     }
@@ -117,14 +124,6 @@ namespace core {
     rhi::Image* Application::getBackImage(uint32_t imageIndex) {
         // RenderGraphへインポートするために、指定されたインデックスのRawポインタを返す
         return m_impl->swapchain->getCurrentImage(imageIndex).get();
-    }
-
-    uint32_t Application::getWidth() const {
-        return m_impl->width;
-    }
-
-    uint32_t Application::getHeight() const {
-        return m_impl->height;
     }
 
 } // namespace core

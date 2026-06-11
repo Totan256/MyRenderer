@@ -11,6 +11,7 @@
 #include "rhi/Resource.hpp"
 #include "core/RenderGraph.hpp"
 #include "rhi/UploadManager.hpp"
+#include "VulkanSemaphore.hpp"
 
 namespace rhi::vk{
     // 前方宣言
@@ -95,6 +96,12 @@ namespace rhi::vk{
         uint32_t getStaticSampler(StringHash nameHash) const;
         rhi::UploadManager* getUploadManager() override;
 
+        void createTimelineSemaphores(); // 論理デバイス作成後に呼ぶ
+        VulkanTimelineSemaphore& getTimelineSemaphore(QueueType type);
+
+        // CPU側での一括待機 (複数キューの特定の SyncPoint を待つ場合)
+        bool waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs = UINT64_MAX);
+
     private:
         struct DeletionEntry {
             uint64_t targetFrame;
@@ -169,5 +176,8 @@ namespace rhi::vk{
         std::unique_ptr<VulkanShaderCache> m_shaderCache;
         std::unique_ptr<VulkanPipelineCache> m_pipelineCacheManager;
         core::VulkanProvider m_provider;
+
+        // タイムラインセマフォ管理
+        std::unordered_map<QueueType, std::unique_ptr<VulkanTimelineSemaphore>> m_timelineSemaphores;
     };
 }

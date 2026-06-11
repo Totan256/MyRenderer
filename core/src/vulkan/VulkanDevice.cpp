@@ -759,4 +759,52 @@ namespace rhi::vk{
         std::lock_guard<std::mutex> lock(m_semaphoreMutex);
         m_semaphorePool.push_back(semaphore); // プールに返却して次回以降使い回す
     }
+
+    void VulkanDevice::createTimelineSemaphores() {
+        m_timelineSemaphores[QueueType::Graphics] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Graphics);
+        m_timelineSemaphores[QueueType::Transfer] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Transfer);
+        // Computeなど他のキューがあれば同様に追加
+    }
+
+    VulkanTimelineSemaphore& VulkanDevice::getTimelineSemaphore(QueueType type) {
+        auto it = m_timelineSemaphores.find(type);
+        if (it != m_timelineSemaphores.end()) {
+            return *(it->second);
+        }
+        throw std::runtime_error("Timeline semaphore for the requested queue type does not exist");
+    }
+
+    bool VulkanDevice::waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs) {
+        if (points.empty()) return true;
+
+        std::vector<VkSemaphore> semaphores;
+        std::vector<uint64_t> waitValues;
+        semaphores.reserve(points.size());
+        waitValues.reserve(points.size());
+
+        // 既に完了しているものを除外する最適化
+        for (const auto& point : points) {
+            auto& timelineSem = getTimelineSemaphore(point.queueType);
+            if (timelineSem.getCompletedValue() < point.value) {
+                semaphores.push_back(timelineSem.getHandle());
+                waitValues.push_back(point.value);
+            }
+        }
+
+        if (semaphores.empty()) return true;
+
+        VkSemaphoreWaitInfo waitInfo{};
+        waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+        waitInfo.pNext = nullptr;
+        waitInfo.flags = 0; // 全て完了するまで待つ
+        waitInfo.semaphoreCount = static_cast<uint32_t>(semaphores.size());
+        waitInfo.pSemaphores = semaphores.data();
+        waitInfo.pValues = waitValues.data();
+
+        VkResult result = vkWaitSemaphores(getDevice(), &waitInfo, timeoutNs);
+        if (result == VK_SUCCESS) return true;
+        if (result == VK_TIMEOUT) return false;
+        
+        throw std::runtime_error("Failed to wait on multiple timeline semaphores");
+    }
 }
