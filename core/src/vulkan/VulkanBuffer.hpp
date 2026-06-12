@@ -25,6 +25,8 @@ namespace rhi::vk{
         VkDeviceSize getSize() const { return m_desc.size; }
         VmaAllocation getAllocation() const { return m_allocation; } 
 
+        
+
         void* map() override;
         void unmap() override;
 
@@ -54,6 +56,7 @@ namespace rhi::vk{
         bool m_isPersistentlyMapped = false;
         uint32_t m_bindlessIndex;
         uint32_t m_bindlessBinding = 0;
+
     };
 
 }

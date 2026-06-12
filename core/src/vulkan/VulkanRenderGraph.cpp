@@ -313,6 +313,13 @@ namespace rhi::vk {
 
     VulkanRenderGraph::~VulkanRenderGraph() {
         clearBatchSemaphores();
+        for (auto& batch : m_batches) {
+            if (batch.commandList) {
+                delete batch.commandList;
+                batch.commandList = nullptr;
+            }
+        }
+        m_batches.clear();
     }
 
     void VulkanRenderGraph::clearBatchSemaphores() {
@@ -374,6 +381,7 @@ namespace rhi::vk {
     void VulkanRenderGraph::compile() {
         std::cout << "Compiling RenderGraph..." << std::endl;
         clearBatchSemaphores();
+        
         m_swapchainSyncs.clear();   
         m_device.flushDescriptorUpdates();
 
@@ -403,6 +411,8 @@ namespace rhi::vk {
             }
         }
 
+        std::cout << "uploads: " << uploads.size() << std::endl;
+
         // 1. Collect Requirements
         for (auto& pass : m_passes) compilePass(pass.get(), m_device);
 
@@ -421,12 +431,17 @@ namespace rhi::vk {
             }
         }
 
+        std::cout << "Total Passes: " << m_passes.size() << std::endl;
+
         // 2. Sort & Allocate
         std::vector<uint32_t> sortedIndices = getSortPasses(passIndices);
         calculateLifetimes(sortedIndices);
-        m_resourceAllocator.allocate(m_resourceRegistry, m_resourceLifetimes);
-
+        std::cout << "Sorted Pass Indices: ";
+        m_resourceAllocator.allocate(m_device.getCurrentFrame(), m_resourceRegistry, m_resourceLifetimes);
+        std::cout << "Resource Allocation Done." << std::endl;
         m_device.flushDescriptorUpdates();
+
+        std::cout << "Sorted Pass Indices: ";
 
         // 3. Batch Division
         m_batches.clear();
@@ -441,22 +456,17 @@ namespace rhi::vk {
                 m_batches.push_back({});
                 currentBatch = &m_batches.back();
                 currentBatch->queueType = pass->getQueueType();
-                currentBatch->cmdList = std::make_unique<VulkanCommandList>(m_device, pass->getQueueType());
+                currentBatch->commandList = new VulkanCommandList(m_device, pass->getQueueType()); // メモリリーク注意：今回はプロトタイピングのまま
                 currentQueue = pass->getQueueType();
 
-                if (m_batches.size() > 1) {
-                    RenderBatch& prevBatch = m_batches[m_batches.size() - 2];
-                    VkSemaphore sem = m_device.requestSemaphore();
-                    m_batchSemaphores.push_back(sem);
-                    prevBatch.signalSemaphores.push_back(sem);
-                    currentBatch->waitSemaphores.push_back(sem);
-                    // 修正点3: 待機ステージの最適化
-                    currentBatch->waitStages.push_back(getWaitStageForQueue(currentBatch->queueType)); 
-                }
+                // 新しいバッチの SignalSyncPoint を発行
+                currentBatch->signalSyncPoint = m_device.advanceTimeline(currentQueue);
             }
             currentBatch->passIndices.push_back(passIdx);
             passToBatch[passIdx] = m_batches.size() - 1;
         }
+
+        std::cout << "Total Passes: " << m_passes.size() << ", Total Batches: " << m_batches.size() << std::endl;
 
         // 4. Barriers & Transitions
         struct ResourceTrackingState { 
@@ -546,7 +556,6 @@ namespace rhi::vk {
                 } else {
                     VulkanResourceState prev = VulkanResourceState{ VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE, VK_IMAGE_LAYOUT_UNDEFINED };
                     
-                    // インポートされた物理リソースの場合、その現在の状態を取得して初期レイアウトとする
                     if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
                         rhi::ResourceState currState = m_resourceRegistry[h].physicalResource->getCurrentState();
                         rhi::ShaderStage currStage = m_resourceRegistry[h].physicalResource->getCurrentStage();
@@ -580,78 +589,131 @@ namespace rhi::vk {
                 currentStates[h] = ResourceTrackingState{ passIdx, next, pass->getQueueType(), req.state, req.stage };
             }
         }
-        
-        for (const auto& [h, track] : currentStates) {
-            for (const auto& [h, track] : currentStates) {
-                const auto& reg = m_resourceRegistry[h];
-                if (reg.isImage() && reg.isImported && reg.physicalResource) {
-                    VulkanImage* physImg = static_cast<VulkanImage*>(reg.physicalResource);
-                    if (physImg->isSwapchainImage()) {
-                        rhi::Swapchain* swapchain = physImg->getSwapchain();                    
-                        // Lifetime情報から、このリソースに「最初に触れたパス」を特定
-                        uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
-                        uint32_t firstBatchIdx = passToBatch[firstPassIdx];
-                        uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];                    
-                        VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(h);                    
-                        // Present用のレイアウト(PRESENT_SRC_KHR)へ最終遷移させるバリアを作成
-                        VkImageMemoryBarrier2 presentBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
-                        presentBarrier.srcStageMask = track.state.stageMask; 
-                        presentBarrier.srcAccessMask = track.state.accessMask;
-                        presentBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // PresentはGPUの動作を待たない
-                        presentBarrier.dstAccessMask = VK_ACCESS_2_NONE;
-                        presentBarrier.oldLayout = track.state.layout; 
-                        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                        presentBarrier.srcQueueFamilyIndex = m_device.getQueueFamilyIndex(track.queueType);
-                        presentBarrier.dstQueueFamilyIndex = m_device.getQueueFamilyIndex(track.queueType); 
-                        presentBarrier.image = physImg->getImage();
-                        presentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };                    
-                        // 最後のバッチにバリアを追加
-                        m_batches[lastBatchIdx].imageBarriers.push_back(presentBarrier);                    
-                        // execute() でセマフォを注入するために記録
-                        m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
-                    }
-                }
-                // グラフ実行完了後の最終状態を物理リソースに記録し、次フレームで正しく引き継げるようにする
-                if (m_resourceRegistry[h].isImported && m_resourceRegistry[h].physicalResource != nullptr) {
-                    m_resourceRegistry[h].physicalResource->setState(track.rhiState, track.rhiStage);
+        std::cout << "Barrier Insertion Done." << std::endl;
+        // --- SyncPoint Tracking ---
+        struct ResourceSyncState {
+            SyncPoint writeSync = {QueueType::Compute, 0};
+            std::vector<SyncPoint> readSyncs;
+        };
+        std::map<rhi::ResourceHandle, ResourceSyncState> currentSyncStates;
+
+        // Initialize from imported physical resources
+        for (size_t i = 0; i < m_resourceRegistry.size(); ++i) {
+            const auto& reg = m_resourceRegistry[i];
+            if (reg.isImported && reg.physicalResource) {
+                currentSyncStates[i].writeSync = reg.physicalResource->getWriteSync();
+                currentSyncStates[i].readSyncs = reg.physicalResource->getReadSyncs();
+            }
+        }
+
+        auto addWaitSync = [](std::vector<SyncPoint>& waits, SyncPoint sp) {
+            if (sp.value == 0) return;
+            for (auto& w : waits) {
+                if (w.queueType == sp.queueType) {
+                    w.value = std::max(w.value, sp.value);
+                    return;
                 }
             }
-            m_sortedIndices = sortedIndices;
+            waits.push_back(sp);
+        };
+
+        for (uint32_t passIdx : sortedIndices) {
+            auto& pass = m_passes[passIdx];
+            uint32_t batchIdx = passToBatch[passIdx];
+            RenderBatch& batch = m_batches[batchIdx];
+
+            for (size_t i = 0; i < pass->getResourceHandles().size(); ++i) {
+                rhi::ResourceHandle h = pass->getResourceHandles()[i];
+                const auto& req = pass->getRequirements()[i];
+                auto& syncState = currentSyncStates[h];
+
+                if (isWriteUsage(req.state)) {
+                    if (syncState.writeSync.value > 0 && syncState.writeSync.queueType != batch.queueType) {
+                        addWaitSync(batch.waitSyncPoints, syncState.writeSync);
+                    }
+                    for (const auto& rs : syncState.readSyncs) {
+                        if (rs.value > 0 && rs.queueType != batch.queueType) {
+                            addWaitSync(batch.waitSyncPoints, rs);
+                        }
+                    }
+                    syncState.writeSync = batch.signalSyncPoint;
+                    syncState.readSyncs.clear();
+                } else {
+                    if (syncState.writeSync.value > 0 && syncState.writeSync.queueType != batch.queueType) {
+                        addWaitSync(batch.waitSyncPoints, syncState.writeSync);
+                    }
+                    bool found = false;
+                    for (auto& rs : syncState.readSyncs) {
+                        if (rs.queueType == batch.queueType) {
+                            rs.value = std::max(rs.value, batch.signalSyncPoint.value);
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        syncState.readSyncs.push_back(batch.signalSyncPoint);
+                    }
+                }
+            }
         }
+
+        std::cout << "Final SyncStates Applied." << std::endl;
+        // Apply final SyncStates back to physical resources
+        for (auto& [h, syncState] : currentSyncStates) {
+            const auto& reg = m_resourceRegistry[h];
+            if (reg.isImported && reg.physicalResource) {
+                reg.physicalResource->setWriteSync(syncState.writeSync);
+                reg.physicalResource->clearReadSyncs();
+                for (const auto& rs : syncState.readSyncs) {
+                    reg.physicalResource->addReadSync(rs);
+                }
+            }
+        }
+        std::cout << "Physical Resource SyncStates Updated." << std::endl;
+        for (const auto& [h, track] : currentStates) {
+            const auto& reg = m_resourceRegistry[h];
+            if (reg.isImage() && reg.isImported && reg.physicalResource) {
+                VulkanImage* physImg = static_cast<VulkanImage*>(reg.physicalResource);
+                if (physImg->isSwapchainImage()) {
+                    rhi::Swapchain* swapchain = physImg->getSwapchain();                    
+                    uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
+                    uint32_t firstBatchIdx = passToBatch[firstPassIdx];
+                    uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];                    
+                    m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
+                    VkImageMemoryBarrier2 presentBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                    presentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    presentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                    presentBarrier.srcStageMask = track.state.stageMask;
+                    presentBarrier.srcAccessMask = track.state.accessMask;
+                    presentBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; 
+                    presentBarrier.dstAccessMask = VK_ACCESS_2_NONE;
+                    presentBarrier.oldLayout = track.state.layout;
+                    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                    presentBarrier.image = physImg->getImage();
+                    presentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+                    
+                    m_batches[lastBatchIdx].postImageBarriers.push_back(presentBarrier);
+                }
+            }
+        }
+        m_sortedIndices = sortedIndices;
     }
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
-        auto asyncSems = m_device.getUploadManager()->consumeAsyncSemaphores();
-        std::vector<SemaphoreHandle> combinedWaitSems = waitSemaphores;
-        combinedWaitSems.insert(combinedWaitSems.end(), asyncSems.begin(), asyncSems.end());
+        std::cout << "Executing RenderGraph..." << std::endl;
+        auto asyncSems = m_device.getUploadManager()->consumeAsyncSyncPoints();
+        std::vector<SyncPoint> combinedAsyncWaits = asyncSems;
 
-        for (const auto& sync : m_swapchainSyncs) {
-            VkSemaphore acquireSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentAcquireSemaphore());
-            VkSemaphore presentSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentPresentSemaphore());
-
-            if (acquireSem != VK_NULL_HANDLE) {
-                // 最初のバッチが実行される前に、画像が利用可能になるのを待つ
-                m_batches[sync.firstBatchIdx].waitSemaphores.push_back(acquireSem);
-                VkPipelineStageFlags waitStage = getWaitStageForQueue(m_batches[sync.firstBatchIdx].queueType);
-                m_batches[sync.firstBatchIdx].waitStages.push_back(waitStage);
-            }
-            if (presentSem != VK_NULL_HANDLE) {
-                // 最後のバッチが終わったら、表示用のセマフォをシグナルする
-                m_batches[sync.lastBatchIdx].signalSemaphores.push_back(presentSem);
-            }
-        }
-
-        // --- バッチサブミット用の構造体 ---
+        // --- バッチサブミット用の構造体 (vkQueueSubmit2 準拠) ---
         struct SubmitBatch {
             VkQueue queue = VK_NULL_HANDLE;
-            std::vector<VkSubmitInfo> submits;
+            std::vector<VkSubmitInfo2> submits;
             VkFence fence = VK_NULL_HANDLE;
             
-            // VkSubmitInfoが指すポインタの寿命をこの構造体内で管理する
-            std::vector<std::vector<VkSemaphore>> waitSemaphoresList;
-            std::vector<std::vector<VkPipelineStageFlags>> waitStagesList;
-            std::vector<std::vector<VkSemaphore>> signalSemaphoresList;
-            std::vector<VkCommandBuffer> cmdBuffers;
+            // VkSubmitInfo2が指すポインタの寿命をこの構造体内で管理する
+            std::vector<std::vector<VkSemaphoreSubmitInfo>> waitSemaphoresList;
+            std::vector<std::vector<VkSemaphoreSubmitInfo>> signalSemaphoresList;
+            std::vector<VkCommandBufferSubmitInfo> cmdBufferInfosList;
         };
 
         std::vector<SubmitBatch> submitBatches;
@@ -659,9 +721,9 @@ namespace rhi::vk {
 
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
             auto& batch = m_batches[batchIdx];
-            batch.cmdList->reset();
-            batch.cmdList->begin();
-            auto vkCmdBuf = static_cast<VulkanCommandList*>(batch.cmdList.get())->getCommandBuffer();
+            batch.commandList->reset();
+            batch.commandList->begin();
+            auto vkCmdBuf = static_cast<VulkanCommandList*>(batch.commandList)->getCommandBuffer();
 
             if (!batch.imageBarriers.empty() || !batch.bufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
@@ -673,10 +735,18 @@ namespace rhi::vk {
             }
 
             for (uint32_t passIdx : batch.passIndices) {
-                executePass(m_passes[passIdx].get(), *batch.cmdList);
+                executePass(m_passes[passIdx].get(), *batch.commandList);
             }
 
-            batch.cmdList->end();
+            // パス実行後のバリア (Presentへの遷移など) を発行
+            if (!batch.postImageBarriers.empty()) {
+                VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+                depInfo.imageMemoryBarrierCount = (uint32_t)batch.postImageBarriers.size();
+                depInfo.pImageMemoryBarriers    = batch.postImageBarriers.data();
+                vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
+            }
+
+            batch.commandList->end();
 
             // キューの切り替え判定
             VkQueue queue = m_device.getQueue(batch.queueType);
@@ -686,22 +756,90 @@ namespace rhi::vk {
             }
             currentSubmitBatch.queue = queue;
 
-            std::vector<VkSemaphore> currentWaitSemaphores = batch.waitSemaphores;
-            std::vector<VkPipelineStageFlags> currentWaitStages = batch.waitStages;
+            std::vector<VkSemaphoreSubmitInfo> currentWaitInfos;
+            std::vector<VkSemaphoreSubmitInfo> currentSignalInfos;
 
-            if (batchIdx == 0) {
-                for (auto semHandle : combinedWaitSems) {
-                    currentWaitSemaphores.push_back(static_cast<VkSemaphore>(semHandle));
-                    currentWaitStages.push_back(getWaitStageForQueue(batch.queueType)); 
+            // --- タイムラインセマフォからの Wait 構築 ---
+            for (const auto& sp : batch.waitSyncPoints) {
+                VkSemaphore sem = m_device.getTimelineSemaphore(sp.queueType);
+                if (sem != VK_NULL_HANDLE && sp.value > 0) {
+                    VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                    waitInfo.semaphore = sem;
+                    waitInfo.value = sp.value;
+                    waitInfo.stageMask = getWaitStageForQueue(batch.queueType);
+                    currentWaitInfos.push_back(waitInfo);
                 }
             }
 
+            if (batchIdx == 0) {
+                for (auto semHandle : waitSemaphores) {
+                    VkSemaphore sem = static_cast<VkSemaphore>(semHandle);
+                    if (sem != VK_NULL_HANDLE) {
+                        VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                        waitInfo.semaphore = sem;
+                        waitInfo.value = 0; // バイナリセマフォ
+                        waitInfo.stageMask = getWaitStageForQueue(batch.queueType);
+                        currentWaitInfos.push_back(waitInfo);
+                    }
+                }
+                for (auto sp : combinedAsyncWaits) {
+                    VkSemaphore sem = m_device.getTimelineSemaphore(sp.queueType);
+                    if (sem != VK_NULL_HANDLE && sp.value > 0) {
+                        VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                        waitInfo.semaphore = sem;
+                        waitInfo.value = sp.value;
+                        waitInfo.stageMask = getWaitStageForQueue(batch.queueType);
+                        currentWaitInfos.push_back(waitInfo);
+                    }
+                }
+            }
+
+            // --- スワップチェーンセマフォからの Wait 構築 ---
+            for (const auto& sync : m_swapchainSyncs) {
+                if (sync.firstBatchIdx == batchIdx) {
+                    VkSemaphore acquireSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentAcquireSemaphore());
+                    if (acquireSem != VK_NULL_HANDLE) {
+                        VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                        waitInfo.semaphore = acquireSem;
+                        waitInfo.value = 0;
+                        waitInfo.stageMask = getWaitStageForQueue(batch.queueType);
+                        currentWaitInfos.push_back(waitInfo);
+                    }
+                }
+            }
+
+            // --- タイムラインセマフォへの Signal 構築 ---
+            VkSemaphore sigSem = m_device.getTimelineSemaphore(batch.signalSyncPoint.queueType);
+            if (sigSem != VK_NULL_HANDLE) {
+                VkSemaphoreSubmitInfo signalInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                signalInfo.semaphore = sigSem;
+                signalInfo.value = batch.signalSyncPoint.value;
+                signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                currentSignalInfos.push_back(signalInfo);
+            }
+
+            // --- スワップチェーンセマフォへの Signal 構築 ---
+            for (const auto& sync : m_swapchainSyncs) {
+                if (sync.lastBatchIdx == batchIdx) {
+                    VkSemaphore presentSem = static_cast<VkSemaphore>(sync.swapchain->getCurrentPresentSemaphore());
+                    if (presentSem != VK_NULL_HANDLE) {
+                        VkSemaphoreSubmitInfo pSignalInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+                        pSignalInfo.semaphore = presentSem;
+                        pSignalInfo.value = 0;
+                        pSignalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                        currentSignalInfos.push_back(pSignalInfo);
+                    }
+                }
+            }
+
+            VkCommandBufferSubmitInfo cmdInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+            cmdInfo.commandBuffer = vkCmdBuf;
+
             // サブミット情報の蓄積
-            currentSubmitBatch.waitSemaphoresList.push_back(currentWaitSemaphores);
-            currentSubmitBatch.waitStagesList.push_back(currentWaitStages);
-            currentSubmitBatch.signalSemaphoresList.push_back(batch.signalSemaphores);
-            currentSubmitBatch.cmdBuffers.push_back(vkCmdBuf);
-            currentSubmitBatch.submits.push_back(VkSubmitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO}); // ダミーをPush。後でポインタを張る
+            currentSubmitBatch.waitSemaphoresList.push_back(currentWaitInfos);
+            currentSubmitBatch.signalSemaphoresList.push_back(currentSignalInfos);
+            currentSubmitBatch.cmdBufferInfosList.push_back(cmdInfo);
+            currentSubmitBatch.submits.push_back(VkSubmitInfo2{VK_STRUCTURE_TYPE_SUBMIT_INFO_2});
 
             if (batchIdx == m_batches.size() - 1) {
                 currentSubmitBatch.fence = m_device.getCurrentFrameFence();
@@ -711,23 +849,24 @@ namespace rhi::vk {
         if (currentSubmitBatch.queue != VK_NULL_HANDLE) {
             submitBatches.push_back(currentSubmitBatch);
         }
+        
+        std::cout << "Batch Preparation Done. Total Batches to Submit: " << submitBatches.size() + (currentSubmitBatch.queue != VK_NULL_HANDLE ? 1 : 0) << std::endl;
 
         // --- バッチサブミットの実行 ---
         for (auto& sb : submitBatches) {
             // vectorが再アロケートされないこのタイミングで、安全にポインタを設定する
             for(size_t i = 0; i < sb.submits.size(); ++i) {
-                sb.submits[i].waitSemaphoreCount = (uint32_t)sb.waitSemaphoresList[i].size();
-                sb.submits[i].pWaitSemaphores = sb.waitSemaphoresList[i].empty() ? nullptr : sb.waitSemaphoresList[i].data();
-                sb.submits[i].pWaitDstStageMask = sb.waitStagesList[i].empty() ? nullptr : sb.waitStagesList[i].data();
+                sb.submits[i].waitSemaphoreInfoCount = (uint32_t)sb.waitSemaphoresList[i].size();
+                sb.submits[i].pWaitSemaphoreInfos = sb.waitSemaphoresList[i].empty() ? nullptr : sb.waitSemaphoresList[i].data();
 
-                sb.submits[i].signalSemaphoreCount = (uint32_t)sb.signalSemaphoresList[i].size();
-                sb.submits[i].pSignalSemaphores = sb.signalSemaphoresList[i].empty() ? nullptr : sb.signalSemaphoresList[i].data();
+                sb.submits[i].signalSemaphoreInfoCount = (uint32_t)sb.signalSemaphoresList[i].size();
+                sb.submits[i].pSignalSemaphoreInfos = sb.signalSemaphoresList[i].empty() ? nullptr : sb.signalSemaphoresList[i].data();
 
-                sb.submits[i].commandBufferCount = 1;
-                sb.submits[i].pCommandBuffers = &sb.cmdBuffers[i];
+                sb.submits[i].commandBufferInfoCount = 1;
+                sb.submits[i].pCommandBufferInfos = &sb.cmdBufferInfosList[i];
             }
-            // バッチごとに1回だけ実行
-            VK_CHECK(vkQueueSubmit(sb.queue, (uint32_t)sb.submits.size(), sb.submits.data(), sb.fence));
+            // バッチごとに vkQueueSubmit2 にて実行
+            VK_CHECK(vkQueueSubmit2(sb.queue, (uint32_t)sb.submits.size(), sb.submits.data(), sb.fence));
         }
     }
 }

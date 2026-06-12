@@ -61,12 +61,17 @@ namespace rhi::vk{
         std::unique_ptr<rhi::CommandList> createCommandList(QueueType queueType = QueueType::Compute) override;
         std::unique_ptr<rhi::Swapchain> createSwapchain(const core::Window& window, const SwapchainConfig& config = {}) override;
 
+        SyncPoint advanceTimeline(QueueType type) override;
+        uint64_t getCompletedTimelineValue(QueueType type) override;
+        void waitTimeline(const std::vector<SyncPoint>& syncPoints, uint64_t timeoutNs = UINT64_MAX) override;
+
         // 生のハンドル取得（拡張性のため）
         VkDevice getDevice() const { return m_device; }
         VkPhysicalDevice getPhysicalDevice() const { return m_physicalDevice; }
         VmaAllocator getAllocator() const { return m_allocator; }
         VkPipelineCache getPipelineCache() const { return m_pipelineCache; }
         VkInstance getInstance() const { return m_instance; }
+        VkSemaphore getTimelineSemaphore(QueueType type) const;
         
         // キューの取得
         VkQueue getQueue(QueueType type) const;
@@ -97,10 +102,10 @@ namespace rhi::vk{
         rhi::UploadManager* getUploadManager() override;
 
         void createTimelineSemaphores(); // 論理デバイス作成後に呼ぶ
-        VulkanTimelineSemaphore& getTimelineSemaphore(QueueType type);
+        // VulkanTimelineSemaphore& getTimelineSemaphore(QueueType type); // キューごとの対応にするため削除？
 
         // CPU側での一括待機 (複数キューの特定の SyncPoint を待つ場合)
-        bool waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs = UINT64_MAX);
+        // bool waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs = UINT64_MAX);
 
     private:
         struct DeletionEntry {
@@ -113,8 +118,17 @@ namespace rhi::vk{
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;
         uint32_t m_computeQueueFamilyIndex = 0;
+        VkSemaphore m_computeTimelineSemaphore = VK_NULL_HANDLE;
+        uint64_t m_computeTimelineValue = 0;
         VkQueue m_graphicsQueue = VK_NULL_HANDLE;
         uint32_t m_graphicsQueueFamilyIndex = 0;
+        VkSemaphore m_graphicsTimelineSemaphore = VK_NULL_HANDLE;
+        uint64_t m_graphicsTimelineValue = 0;
+        VkQueue m_transferQueue = VK_NULL_HANDLE;
+        uint32_t m_transferQueueFamilyIndex = 0;
+        VkSemaphore m_transferTimelineSemaphore = VK_NULL_HANDLE;
+        uint64_t m_transferTimelineValue = 0;
+
         VmaAllocator m_allocator = VK_NULL_HANDLE;
         VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;
 
@@ -149,8 +163,7 @@ namespace rhi::vk{
         std::map<StringHash, uint32_t> m_staticSamplers;
         std::map<StringHash, VkSampler> m_samplers; 
 
-        std::optional<uint32_t> findGraphicsQueueFamilyIndex(VkPhysicalDevice device);
-        void createStaticSamplers();
+        void createStaticSamplers(); // 後で消す
 
         // Frame in Flight数 (初期化時に決定)
         uint32_t m_framesInFlight = MAX_FRAMES_IN_FLIGHT;
@@ -168,7 +181,9 @@ namespace rhi::vk{
         void createAllocator();
         uint32_t allocateIndex();
 
+        std::optional<uint32_t> findGraphicsQueueFamilyIndex(VkPhysicalDevice device);
         std::optional<uint32_t> findComputeQueueFamilyIndex(VkPhysicalDevice device);
+        std::optional<uint32_t> findTransferQueueFamilyIndex(VkPhysicalDevice device);
 
         std::mutex m_semaphoreMutex;
         std::vector<VkSemaphore> m_semaphorePool;

@@ -7,7 +7,7 @@
 
 namespace rhi::vk {
     VulkanUploadManager::VulkanUploadManager(VulkanDevice& device, uint32_t framesInFlight, size_t ringBufferSize)
-        : m_device(device), m_framesInFlight(framesInFlight) {m_frameSemaphoresToRelease.resize(m_framesInFlight);
+        : m_device(device), m_framesInFlight(framesInFlight) {
         m_frameStates.resize(m_framesInFlight);
         for (uint32_t i = 0; i < m_framesInFlight; ++i) {
             m_frameStates[i].ringBufferSize = ringBufferSize;
@@ -21,9 +21,6 @@ namespace rhi::vk {
             if (ctx->syncFence != VK_NULL_HANDLE) {
                 vkDestroyFence(m_device.getDevice(), ctx->syncFence, nullptr);
             }
-        }
-        for (auto& sems : m_frameSemaphoresToRelease) {
-            for (VkSemaphore sem : sems) m_device.releaseSemaphore(sem);
         }
     }
 
@@ -91,10 +88,6 @@ namespace rhi::vk {
 
     void VulkanUploadManager::beginFrame(uint64_t currentFrameIndex) {
         m_currentFrameIndex = currentFrameIndex % m_framesInFlight;
-        for (VkSemaphore sem : m_frameSemaphoresToRelease[m_currentFrameIndex]) {
-            m_device.releaseSemaphore(sem);
-        }
-        m_frameSemaphoresToRelease[m_currentFrameIndex].clear();
         auto& state = m_frameStates[m_currentFrameIndex];
         state.pendingTemporaryBuffers.clear();
         state.ringBufferOffset = 0;
@@ -130,9 +123,11 @@ namespace rhi::vk {
         });
     }
 
-    rhi::SemaphoreHandle VulkanUploadManager::submitUploadsAsync() {
+    SyncPoint VulkanUploadManager::submitUploadsAsync() {
         auto& state = m_frameStates[m_currentFrameIndex];
-        if (state.pendingUploads.empty() && state.pendingImageUploads.empty()) return nullptr;
+        if (state.pendingUploads.empty() && state.pendingImageUploads.empty()) {
+            return SyncPoint{QueueType::Transfer, 0}; // 無効なSyncPointを返す
+        }
 
         retireCompletedAsyncContexts(false);
         AsyncUploadContext* ctx = getOrCreateAsyncContext();
@@ -141,7 +136,7 @@ namespace rhi::vk {
         ctx->cmdList->reset();
         ctx->cmdList->begin();
 
-        // コマンドの記録 (現状の処理と同じ)
+        // コマンドの記録
         for (const auto& up : state.pendingUploads) {
             ctx->cmdList->copyBuffer(up.stagingBuffer, up.dstBuffer, up.size, up.stagingOffset, 0);
         }
@@ -182,46 +177,58 @@ namespace rhi::vk {
         }
         ctx->cmdList->end();
 
-        // バッファ所有権の退避
+        // バッファ所有権の退避と新規補充
         ctx->retainedRingBuffer = std::move(state.ringBuffer);
         for(auto& tempBuf : state.pendingTemporaryBuffers){
             ctx->retainedBuffers.push_back(std::move(tempBuf));
         }
         state.pendingTemporaryBuffers.clear();
-        
-        // プールから新しいリングバッファを取得して補充 (DRY化)
         resetRingBufferState(state, getOrCreateRingBuffer(state.ringBufferSize));
-        // セマフォはSubmitのたびに新規取得し、フレーム単位のリストでライフサイクル管理する
-        VkSemaphore syncSemaphore = m_device.requestSemaphore();
-        m_frameSemaphoresToRelease[m_currentFrameIndex].push_back(syncSemaphore);
-        m_pendingAsyncSemaphores.push_back(syncSemaphore);
+        
+        // --- タイムラインセマフォの取得とシグナル設定 ---
+        SyncPoint syncPoint = m_device.advanceTimeline(QueueType::Transfer);
+        VkSemaphore timelineSemaphore = m_device.getTimelineSemaphore(QueueType::Transfer);
+        m_pendingAsyncSyncPoints.push_back(syncPoint); // グラフ側での回収用に記録
+
+        // アップロード先リソースに直接同期情報を書き込む
+        for (const auto& up : state.pendingUploads) {
+            up.dstBuffer->setWriteSync(syncPoint);
+        }
+        for (const auto& up : state.pendingImageUploads) {
+            up.dstImage->setWriteSync(syncPoint);
+        }
+
+        // VkTimelineSemaphoreSubmitInfo を追加して提出
+        VkTimelineSemaphoreSubmitInfo timelineInfo{ VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO };
+        timelineInfo.signalSemaphoreValueCount = 1;
+        timelineInfo.pSignalSemaphoreValues = &syncPoint.value;
 
         VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+        submitInfo.pNext = &timelineInfo;
         VkCommandBuffer cmdBuf = ctx->cmdList->getCommandBuffer();
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmdBuf;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &syncSemaphore;
+        submitInfo.pSignalSemaphores = &timelineSemaphore;
 
-        vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, ctx->syncFence);
+        if (vkQueueSubmit(m_device.getQueue(QueueType::Transfer), 1, &submitInfo, ctx->syncFence) != VK_SUCCESS) {
+            std::cerr << "Failed to submit transfer command buffer!" << std::endl;
+        }
 
         state.pendingUploads.clear();
         state.pendingImageUploads.clear();
 
-        return syncSemaphore;
+        return syncPoint;
     }
 
     void VulkanUploadManager::waitUploads() {
-        retireCompletedAsyncContexts(true); // waitAll = true で全フェンス待機
+        retireCompletedAsyncContexts(true);
     }
 
-    std::vector<rhi::SemaphoreHandle> VulkanUploadManager::consumeAsyncSemaphores() {
-        std::vector<rhi::SemaphoreHandle> sems;
-        for (auto sem : m_pendingAsyncSemaphores) {
-            sems.push_back(sem);
-        }
-        m_pendingAsyncSemaphores.clear();
-        return sems;
+    std::vector<SyncPoint> VulkanUploadManager::consumeAsyncSyncPoints() {
+        std::vector<SyncPoint> sps = std::move(m_pendingAsyncSyncPoints);
+        m_pendingAsyncSyncPoints.clear();
+        return sps;
     }
 
     std::unique_ptr<VulkanBuffer> VulkanUploadManager::getOrCreateRingBuffer(size_t size) {

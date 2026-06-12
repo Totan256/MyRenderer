@@ -19,6 +19,7 @@ namespace rhi::vk{
             VkClearValue clearValue;
         };
         VulkanCommandList(VulkanDevice& device, QueueType queueType);
+        VulkanCommandList(VulkanDevice& device, QueueType queueType, VkCommandPool pool);
         ~VulkanCommandList() override;
         
         // コマンド記録の開始と終了
@@ -74,5 +75,7 @@ namespace rhi::vk{
         VkCommandPool m_commandPool = VK_NULL_HANDLE;
         VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
         VkFence m_fence = VK_NULL_HANDLE; // 完了待ちのためのフェンス
+
+        bool m_ownsPool = false; // コマンドプールを所有しているか（外部から渡された場合はfalse）
     };
 }

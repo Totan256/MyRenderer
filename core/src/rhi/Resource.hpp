@@ -12,7 +12,19 @@ namespace rhi {
         virtual bool isImage() const = 0;
         virtual ResourceState getCurrentState() const = 0;
         virtual ShaderStage getCurrentStage() const = 0;
+        
+        // --- 同期状態の追跡 (Timeline Semaphore 用) ---
+        void setWriteSync(SyncPoint sp) { m_writeSync = sp; }
+        SyncPoint getWriteSync() const  { return m_writeSync; }
+        void addReadSync(SyncPoint sp)  { m_readSyncs.push_back(sp); }
+        const std::vector<SyncPoint>& getReadSyncs() const { return m_readSyncs; }
+        void clearReadSyncs() { m_readSyncs.clear(); }
+
         virtual void setState(ResourceState state, ShaderStage stage) = 0;
+    protected:
+        std::vector<SyncPoint> m_readSyncs;
+        SyncPoint m_writeSync;
+        
     };
 
     constexpr size_t WHOLE_SIZE = ~0ULL;

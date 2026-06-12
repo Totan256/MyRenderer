@@ -102,6 +102,7 @@ namespace rhi::vk{
         m_minUniformBufferOffsetAlignment = static_cast<uint32_t>(properties.limits.minUniformBufferOffsetAlignment);
 
         createLogicalDevice();
+        createTimelineSemaphores();
         createAllocator();
         
         // --- Pipeline Cache の初期化 ---
@@ -267,10 +268,16 @@ namespace rhi::vk{
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        // タイムラインセマフォ機能の有効化
+        VkPhysicalDeviceTimelineSemaphoreFeatures timelineFeatures{};
+        timelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+        timelineFeatures.timelineSemaphore = VK_TRUE;
+
         // Synchronization2 機能を有効化
         VkPhysicalDeviceSynchronization2Features sync2Features{};
         sync2Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
         sync2Features.synchronization2 = VK_TRUE;
+        sync2Features.pNext = &timelineFeatures;
 
         // Dynamic Rendering 機能を有効化
         VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures{};
@@ -400,6 +407,10 @@ namespace rhi::vk{
         if (m_device != VK_NULL_HANDLE) {
             vkDeviceWaitIdle(m_device);
         }
+        for (auto& entry : m_deletionQueue) {
+            entry.func();
+        }
+        m_deletionQueue.clear();
         enqueueDeletion([&samplers = m_samplers, device = m_device]() {
             for (auto& [hash, sampler] : samplers) {
                 if (sampler != VK_NULL_HANDLE) {
@@ -456,6 +467,9 @@ namespace rhi::vk{
         if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
         if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
         if (m_allocator) vmaDestroyAllocator(m_allocator);
+        if (m_graphicsTimelineSemaphore) vkDestroySemaphore(m_device, m_graphicsTimelineSemaphore, nullptr);
+        if (m_computeTimelineSemaphore) vkDestroySemaphore(m_device, m_computeTimelineSemaphore, nullptr);
+        if (m_transferTimelineSemaphore) vkDestroySemaphore(m_device, m_transferTimelineSemaphore, nullptr);
         if (m_device) vkDestroyDevice(m_device, nullptr);
         if (m_instance) vkDestroyInstance(m_instance, nullptr);
         
@@ -761,50 +775,101 @@ namespace rhi::vk{
     }
 
     void VulkanDevice::createTimelineSemaphores() {
-        m_timelineSemaphores[QueueType::Graphics] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Graphics);
-        m_timelineSemaphores[QueueType::Transfer] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Transfer);
-        // Computeなど他のキューがあれば同様に追加
-    }
+        VkSemaphoreTypeCreateInfo timelineCreateInfo{};
+        timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        timelineCreateInfo.pNext = nullptr;
+        timelineCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        timelineCreateInfo.initialValue = 0;
 
-    VulkanTimelineSemaphore& VulkanDevice::getTimelineSemaphore(QueueType type) {
-        auto it = m_timelineSemaphores.find(type);
-        if (it != m_timelineSemaphores.end()) {
-            return *(it->second);
+        VkSemaphoreCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        createInfo.pNext = &timelineCreateInfo;
+        createInfo.flags = 0;
+
+        if (vkCreateSemaphore(m_device, &createInfo, nullptr, &m_graphicsTimelineSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(m_device, &createInfo, nullptr, &m_transferTimelineSemaphore) != VK_SUCCESS ||
+            vkCreateSemaphore(m_device, &createInfo, nullptr, &m_computeTimelineSemaphore) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create timeline semaphores!");
         }
-        throw std::runtime_error("Timeline semaphore for the requested queue type does not exist");
     }
 
-    bool VulkanDevice::waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs) {
-        if (points.empty()) return true;
+    SyncPoint VulkanDevice::advanceTimeline(QueueType type) {
+        SyncPoint sp;
+        sp.queueType = type;
+        switch (type) {
+            case QueueType::Graphics: sp.value = ++m_graphicsTimelineValue; break;
+            case QueueType::Transfer: sp.value = ++m_transferTimelineValue; break;
+            case QueueType::Compute:  sp.value = ++m_computeTimelineValue; break;
+        }
+        return sp;
+    }
+
+    uint64_t VulkanDevice::getCompletedTimelineValue(QueueType type) {
+        uint64_t value = 0;
+        vkGetSemaphoreCounterValue(m_device, getTimelineSemaphore(type), &value);
+        return value;
+    }
+
+    VkSemaphore VulkanDevice::getTimelineSemaphore(QueueType type) const {
+        switch (type) {
+            case QueueType::Graphics: return m_graphicsTimelineSemaphore;
+            case QueueType::Transfer: return m_transferTimelineSemaphore;
+            case QueueType::Compute:  return m_computeTimelineSemaphore;
+            default: return VK_NULL_HANDLE;
+        }
+    }
+
+    void VulkanDevice::waitTimeline(const std::vector<SyncPoint>& syncPoints, uint64_t timeoutNs) {
+        if (syncPoints.empty()) return;
 
         std::vector<VkSemaphore> semaphores;
-        std::vector<uint64_t> waitValues;
-        semaphores.reserve(points.size());
-        waitValues.reserve(points.size());
-
-        // 既に完了しているものを除外する最適化
-        for (const auto& point : points) {
-            auto& timelineSem = getTimelineSemaphore(point.queueType);
-            if (timelineSem.getCompletedValue() < point.value) {
-                semaphores.push_back(timelineSem.getHandle());
-                waitValues.push_back(point.value);
-            }
+        std::vector<uint64_t> values;
+        
+        for (const auto& sp : syncPoints) {
+            semaphores.push_back(getTimelineSemaphore(sp.queueType));
+            values.push_back(sp.value);
         }
-
-        if (semaphores.empty()) return true;
 
         VkSemaphoreWaitInfo waitInfo{};
         waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-        waitInfo.pNext = nullptr;
-        waitInfo.flags = 0; // 全て完了するまで待つ
         waitInfo.semaphoreCount = static_cast<uint32_t>(semaphores.size());
         waitInfo.pSemaphores = semaphores.data();
-        waitInfo.pValues = waitValues.data();
-
-        VkResult result = vkWaitSemaphores(getDevice(), &waitInfo, timeoutNs);
-        if (result == VK_SUCCESS) return true;
-        if (result == VK_TIMEOUT) return false;
+        waitInfo.pValues = values.data();
         
-        throw std::runtime_error("Failed to wait on multiple timeline semaphores");
+        vkWaitSemaphores(m_device, &waitInfo, timeoutNs);
     }
+
+    // bool VulkanDevice::waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs) {
+    //     if (points.empty()) return true;
+
+    //     std::vector<VkSemaphore> semaphores;
+    //     std::vector<uint64_t> waitValues;
+    //     semaphores.reserve(points.size());
+    //     waitValues.reserve(points.size());
+
+    //     // 既に完了しているものを除外する最適化
+    //     for (const auto& point : points) {
+    //         auto& timelineSem = getTimelineSemaphore(point.queueType);
+    //         if (timelineSem.getCompletedValue() < point.value) {
+    //             semaphores.push_back(timelineSem.getHandle());
+    //             waitValues.push_back(point.value);
+    //         }
+    //     }
+
+    //     if (semaphores.empty()) return true;
+
+    //     VkSemaphoreWaitInfo waitInfo{};
+    //     waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    //     waitInfo.pNext = nullptr;
+    //     waitInfo.flags = 0; // 全て完了するまで待つ
+    //     waitInfo.semaphoreCount = static_cast<uint32_t>(semaphores.size());
+    //     waitInfo.pSemaphores = semaphores.data();
+    //     waitInfo.pValues = waitValues.data();
+
+    //     VkResult result = vkWaitSemaphores(getDevice(), &waitInfo, timeoutNs);
+    //     if (result == VK_SUCCESS) return true;
+    //     if (result == VK_TIMEOUT) return false;
+        
+    //     throw std::runtime_error("Failed to wait on multiple timeline semaphores");
+    // }
 }

@@ -7,12 +7,6 @@
 #include <vector>
 #include <unordered_map>
 
-/*
-アップロードを「リクエスト溜め込み」「submit」「wait」で分割
-submitがされてなければレンダーグラフが遅延アップロードとして行い，
-waitだけされてなければレンダーグラフがセマフォを設置することで開発者がアップロードを柔軟に行えることを期待
-*/
-
 namespace rhi::vk {
     struct StagingAllocation {
         VulkanBuffer* buffer;
@@ -33,7 +27,6 @@ namespace rhi::vk {
         std::unique_ptr<VulkanCommandList> cmdList;
         VkFence syncFence = VK_NULL_HANDLE;
         
-        // この非同期アップロードで使用中のステージングバッファを保持（転送完了後に破棄/再利用）
         std::vector<std::unique_ptr<VulkanBuffer>> retainedBuffers;
         std::unique_ptr<VulkanBuffer> retainedRingBuffer;
     };
@@ -51,12 +44,12 @@ namespace rhi::vk {
         void enqueueBufferUpload(Buffer* dstBuffer, const void* data, size_t size, size_t dstOffset = 0) override;
         void enqueueImageUpload(Image* dstImage, const void* data, size_t size, uint32_t width, uint32_t height, uint32_t mipLevels) override;
 
-        // 非同期実行と待機
-        SemaphoreHandle submitUploadsAsync() override;
+        // SyncPoint を返すように変更
+        SyncPoint submitUploadsAsync() override;
         void waitUploads() override;
 
-        // RenderGraph実行時に未回収のセマフォを全て回収する
-        std::vector<SemaphoreHandle> consumeAsyncSemaphores() override;
+        // RenderGraph 側に渡すための SyncPoint 回収
+        std::vector<SyncPoint> consumeAsyncSyncPoints() override;
         
         std::vector<UploadRequest> getAndClearPendingUploads() override;
         std::vector<rhi::ImageUploadRequest> getAndClearPendingImageUploads() override;
@@ -69,12 +62,13 @@ namespace rhi::vk {
         std::vector<std::unique_ptr<AsyncUploadContext>> m_asyncContextPool;
         std::vector<AsyncUploadContext*> m_activeAsyncContexts;
         std::vector<PerFrameUploadState> m_frameStates;
-        std::vector<VkSemaphore> m_pendingAsyncSemaphores;
+        
+        // グラフで処理するための未回収 SyncPoint のリスト
+        std::vector<SyncPoint> m_pendingAsyncSyncPoints;
 
-        // 再利用可能なリングバッファのプール
         std::vector<std::unique_ptr<VulkanBuffer>> m_freeRingBuffers;
-        // レームごとに使用済みのセマフォを保持し、安全なタイミングで返却する
-        std::vector<std::vector<VkSemaphore>> m_frameSemaphoresToRelease;
+
+        // ※ m_frameSemaphoresToRelease はタイムライン採用により不要になったため削除
 
         AsyncUploadContext* getOrCreateAsyncContext();
         void retireCompletedAsyncContexts(bool waitAll = false);

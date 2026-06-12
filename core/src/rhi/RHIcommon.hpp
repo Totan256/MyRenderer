@@ -24,11 +24,10 @@ namespace rhi {
     struct SyncPoint {
         QueueType queueType;
         uint64_t value;
-
-        // CPU側で現在の完了値と比較する際に使用
-        bool isReached(uint64_t currentValue) const {
-            return currentValue >= value;
-        }
+        // // CPU側で現在の完了値と比較する際に使用
+        // bool isReached(uint64_t currentValue) const {
+        //     return currentValue >= value;
+        // }
     };
 
     enum class BufferUsageFlags : uint32_t {

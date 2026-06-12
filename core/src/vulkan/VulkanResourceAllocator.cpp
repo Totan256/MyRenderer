@@ -5,12 +5,25 @@
 #include <algorithm>
 
 namespace rhi::vk{
+    VulkanResourceAllocator::VulkanResourceAllocator(VulkanDevice& device, uint32_t framesInFlight)
+        : m_device(device), m_framesInFlight(framesInFlight) 
+    {
+        m_imagePools.resize(framesInFlight);
+        m_bufferPools.resize(framesInFlight);
+    }
+    
     void VulkanResourceAllocator::allocate(
+        uint64_t currentFrameIndex,
         const std::vector<ResourceRegistration>& registry,
         const std::vector<ResourceLifetime>& lifetimes) 
     {
         m_imageMap.clear();
         m_bufferMap.clear();
+
+        uint32_t frameIdx = currentFrameIndex % m_framesInFlight;
+
+        auto& currentImagePool = m_imagePools[frameIdx];
+        auto& currentBufferPool = m_bufferPools[frameIdx];
 
         // 1. 生存期間の開始順（firstPass）にハンドルをソートして処理する
         std::vector<ResourceHandle> sortedHandles;
@@ -39,11 +52,11 @@ namespace rhi::vk{
             
             if (reg.isImage()) {
                 VulkanImage* assignedImage = nullptr;
-                // プールから再利用可能なものを探す
+                // 現在のフレーム用のプールから再利用可能なものを探す
                 auto* imgDesc = std::get_if<ImageDesc>(&reg.desc);
-                for (auto& entry : m_imagePool) {
+                for (auto& entry : currentImagePool) {
                     // 条件1: 仕様（サイズ、フォーマット）が一致
-                    // 条件2: 前の使用者の終了時間 < 自分の開始時間
+                    // 条件2: 前の使用者の終了時間 < 自分の開始時間 (同一フレーム内でのエイリアシング確認)
                     if (entry.image->getDesc().isCompatible(*imgDesc) && 
                         entry.lastUsedPass < life.firstPass) 
                     {
@@ -56,13 +69,13 @@ namespace rhi::vk{
                     VkImageUsageFlags vkUsage = mapImageUsage(imgDesc->usageFlags);
                     auto newImg = std::make_unique<VulkanImage>(m_device, *imgDesc, vkUsage);
                     assignedImage = newImg.get();
-                    m_imagePool.push_back({ std::move(newImg), life.lastPass });
+                    currentImagePool.push_back({ std::move(newImg), life.lastPass });
                 }
                 m_imageMap[h] = assignedImage;
-            }else {
+            } else {
                 VulkanBuffer* assignedBuffer = nullptr;
                 auto* bufferDesc = std::get_if<BufferDesc>(&reg.desc);
-                for (auto& entry : m_bufferPool) {
+                for (auto& entry : currentBufferPool) {
                     if (entry.buffer->getDesc().isCompatible(*bufferDesc) && 
                         entry.lastUsedPass < life.firstPass) 
                     {
@@ -78,11 +91,11 @@ namespace rhi::vk{
                         m_device, 
                         m_device.getAllocator(), 
                         bufferDesc->size,
-                        vkUsage,                  // 変換したフラグを渡す
+                        vkUsage,
                         bufferDesc->isCpuVisible ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
                     );
                     assignedBuffer = newBuf.get();
-                    m_bufferPool.push_back({ std::move(newBuf), life.lastPass });
+                    currentBufferPool.push_back({ std::move(newBuf), life.lastPass });
                 }
                 m_bufferMap[h] = assignedBuffer;
             }

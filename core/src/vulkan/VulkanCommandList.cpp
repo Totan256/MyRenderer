@@ -4,7 +4,7 @@
 #include <iostream>
 namespace rhi::vk {
     VulkanCommandList::VulkanCommandList(VulkanDevice& device, QueueType queueType)
-        : m_device(device), m_queueType(queueType) {
+        : m_device(device), m_queueType(queueType), m_ownsPool(true) {
 
         VkDevice logicalDevice = m_device.getDevice();
 
@@ -41,13 +41,25 @@ namespace rhi::vk {
         }
     }
 
+    VulkanCommandList::VulkanCommandList(VulkanDevice& device, QueueType queueType, VkCommandPool pool)
+        : m_device(device), m_queueType(queueType), m_commandPool(pool), m_ownsPool(false) {
+        
+        VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        allocInfo.commandPool = m_commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+        
+        // CommandBuffer はプールから割り当てるのみ
+        vkAllocateCommandBuffers(m_device.getDevice(), &allocInfo, &m_commandBuffer);
+    }
+
     VulkanCommandList::~VulkanCommandList() {
         VkDevice logicalDevice = m_device.getDevice();
         
         if (m_fence != VK_NULL_HANDLE) {
             vkDestroyFence(logicalDevice, m_fence, nullptr);
         }
-        if (m_commandPool != VK_NULL_HANDLE) {
+        if (m_ownsPool && m_commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(logicalDevice, m_commandPool, nullptr);
         }
         // コマンドバッファはプール破棄時に一緒に消えるので解放不要
@@ -70,28 +82,36 @@ namespace rhi::vk {
     }
 
     void VulkanCommandList::submit(SemaphoreHandle waitSemaphore, SemaphoreHandle signalSemaphore) {
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &m_commandBuffer;
+        VkCommandBufferSubmitInfo cmdInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+        cmdInfo.commandBuffer = m_commandBuffer;
 
-        VkSemaphore vkWaitSem = static_cast<VkSemaphore>(waitSemaphore);
-        VkSemaphore vkSignalSem = static_cast<VkSemaphore>(signalSemaphore);
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT}; 
-        
-        if (vkWaitSem != VK_NULL_HANDLE) {
-            submitInfo.waitSemaphoreCount = 1;
-            submitInfo.pWaitSemaphores = &vkWaitSem;
-            submitInfo.pWaitDstStageMask = waitStages;
+        std::vector<VkSemaphoreSubmitInfo> waitInfos;
+        if (waitSemaphore) {
+            VkSemaphoreSubmitInfo wInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            wInfo.semaphore = static_cast<VkSemaphore>(waitSemaphore);
+            wInfo.value = 0; // 旧仕様との互換のためバイナリセマフォとして扱う
+            wInfo.stageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; // 旧互換
+            waitInfos.push_back(wInfo);
         }
 
-        if (vkSignalSem != VK_NULL_HANDLE) {
-            submitInfo.signalSemaphoreCount = 1;
-            submitInfo.pSignalSemaphores = &vkSignalSem;
+        std::vector<VkSemaphoreSubmitInfo> signalInfos;
+        if (signalSemaphore) {
+            VkSemaphoreSubmitInfo sInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
+            sInfo.semaphore = static_cast<VkSemaphore>(signalSemaphore);
+            sInfo.value = 0; // バイナリセマフォ
+            sInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // 旧互換
+            signalInfos.push_back(sInfo);
         }
 
-        // m_fence を渡して実行。完了するとフェンスがシグナル状態になるが、CPUでは待たない
-        if (vkQueueSubmit(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
+        VkSubmitInfo2 submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &cmdInfo;
+        submitInfo.waitSemaphoreInfoCount = static_cast<uint32_t>(waitInfos.size());
+        submitInfo.pWaitSemaphoreInfos = waitInfos.empty() ? nullptr : waitInfos.data();
+        submitInfo.signalSemaphoreInfoCount = static_cast<uint32_t>(signalInfos.size());
+        submitInfo.pSignalSemaphoreInfos = signalInfos.empty() ? nullptr : signalInfos.data();
+
+        if (vkQueueSubmit2(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit command buffer!");
         }
     }
@@ -104,13 +124,14 @@ namespace rhi::vk {
     }
 
     void VulkanCommandList::submitAndWait() {
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &m_commandBuffer;
+        VkCommandBufferSubmitInfo cmdInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+        cmdInfo.commandBuffer = m_commandBuffer;
 
-        // フェンスを渡して実行。完了するとフェンスがシグナル状態になる
-        if (vkQueueSubmit(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
+        VkSubmitInfo2 submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        submitInfo.commandBufferInfoCount = 1;
+        submitInfo.pCommandBufferInfos = &cmdInfo;
+
+        if (vkQueueSubmit2(m_device.getQueue(m_queueType), 1, &submitInfo, m_fence) != VK_SUCCESS) {
             throw std::runtime_error("failed to submit draw command buffer!");
         }
 

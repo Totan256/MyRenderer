@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include "RHIcommon.hpp"
 #include "rhi/Resource.hpp"
 #include "RHIForward.hpp"
 #include "RHIcommon.hpp"
@@ -22,6 +23,13 @@ namespace rhi {
         virtual void endFrame() = 0;
         virtual void waitForFrame(uint64_t frameIndex) = 0;
         virtual uint64_t getCurrentFrame() const = 0;
+
+        // timeline semaphore 関連の抽象メソッド
+        virtual SyncPoint advanceTimeline(QueueType type) = 0;
+        // 指定したキューでGPUが完了した最新のタイムライン値を取得する
+        virtual uint64_t getCompletedTimelineValue(QueueType type) = 0;
+        // CPU側で指定した SyncPoint が全てGPUで完了するまで待機する
+        virtual void waitTimeline(const std::vector<SyncPoint>& syncPoints, uint64_t timeoutNs = UINT64_MAX) = 0;
 
         // リソース作成ファクトリ
         virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;

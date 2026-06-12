@@ -11,14 +11,19 @@
 namespace rhi::vk {
     struct RenderBatch {
         QueueType queueType;
+        // このバッチが実行される前にGPUで完了していなければならないSyncPointのリスト
+        std::vector<SyncPoint> waitSyncPoints;
+        // このバッチが完了したときにシグナルされるSyncPoint
+        SyncPoint signalSyncPoint;
         std::vector<uint32_t> passIndices;
-        std::vector<VkSemaphore> waitSemaphores;
-        std::vector<VkPipelineStageFlags> waitStages;
-        std::vector<VkSemaphore> signalSemaphores;
-        std::unique_ptr<VulkanCommandList> cmdList;
+        // std::vector<VkSemaphore> waitSemaphores;
+        // std::vector<VkPipelineStageFlags> waitStages;
+        // std::vector<VkSemaphore> signalSemaphores;
+        VulkanCommandList* commandList = nullptr;
         
         std::vector<VkImageMemoryBarrier2> imageBarriers;
         std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+        std::vector<VkImageMemoryBarrier2> postImageBarriers;
     };
 
     struct SwapchainSync {
@@ -29,7 +34,7 @@ namespace rhi::vk {
 
     class VulkanRenderGraph : public RenderGraph {
     public:
-        VulkanRenderGraph(VulkanDevice& device) : m_device(device), m_resourceAllocator(device) {}
+        VulkanRenderGraph(VulkanDevice& device) : m_device(device), m_resourceAllocator(device, MAX_FRAMES_IN_FLIGHT) {}
         ~VulkanRenderGraph() override;
 
         ComputePass& addComputePass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;

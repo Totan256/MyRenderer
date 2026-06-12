@@ -19,10 +19,11 @@ namespace rhi::vk {
 
     class VulkanResourceAllocator {
     public:
-        VulkanResourceAllocator(VulkanDevice& device) : m_device(device) {}
+        VulkanResourceAllocator(VulkanDevice& device, uint32_t framesInFlight);
 
         // compile() から呼ばれるメインの割り当て関数
         void allocate(
+            uint64_t currentFrameIndex,
             const std::vector<ResourceRegistration>& registry,
             const std::vector<ResourceLifetime>& lifetimes);
 
@@ -32,14 +33,14 @@ namespace rhi::vk {
 
     private:
         VulkanDevice& m_device;
-        
+        uint32_t m_framesInFlight;
         // ハンドルと物理リソースの対応表
         std::map<ResourceHandle, VulkanImage*> m_imageMap;
         std::map<ResourceHandle, VulkanBuffer*> m_bufferMap;
 
         // 再利用のためのプール
-        std::vector<ReusableImage> m_imagePool;
-        std::vector<ReusableBuffer> m_bufferPool;
+        std::vector<std::vector<ReusableImage>> m_imagePools;
+        std::vector<std::vector<ReusableBuffer>> m_bufferPools;
 
     };
 }
