@@ -256,7 +256,7 @@ namespace rhi {
         }
 
         GraphicsPass& addColorOutput(uint32_t location, ResourceHandle handle, LoadOp loadOp = LoadOp::Clear, StoreOp storeOp = StoreOp::Store, ColorClearValue clearValue = {0,0,0,1}) {
-            m_colorAttachments.push_back({location, handle, loadOp, storeOp, clearValue});
+            m_colorAttachments[location] = {location, handle, loadOp, storeOp, clearValue};
             return *this;
         }
         
@@ -281,11 +281,14 @@ namespace rhi {
         }
 
         const std::map<StringHash, uint32_t>& getPushConstantOffsets() const { return m_pushConstantOffsets; }
+        const std::map<uint32_t, ColorAttachmentInfo>& getColorAttachments() const { return m_colorAttachments; }
+        const std::optional<DepthAttachmentInfo>& getDepthAttachment() const { return m_depthAttachment; }
+        const GraphicsState& getGraphicsState() const { return m_graphicsState; }
 
     protected:
         std::string m_vertShaderPath, m_fragShaderPath;
         GraphicsState m_graphicsState;
-        std::vector<ColorAttachmentInfo> m_colorAttachments;
+        std::map<uint32_t, ColorAttachmentInfo> m_colorAttachments;
         std::optional<DepthAttachmentInfo> m_depthAttachment;
         std::deque<GraphicsDraw> m_draws;
         std::map<StringHash, uint32_t> m_pushConstantOffsets;

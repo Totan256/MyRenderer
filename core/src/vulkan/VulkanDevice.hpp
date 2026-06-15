@@ -106,7 +106,7 @@ namespace rhi::vk{
 
         // CPU側での一括待機 (複数キューの特定の SyncPoint を待つ場合)
         // bool waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs = UINT64_MAX);
-
+        VulkanTimelineSemaphore& getTimelineSemaphoreObject(QueueType type);
     private:
         struct DeletionEntry {
             uint64_t targetFrame;
@@ -118,16 +118,10 @@ namespace rhi::vk{
         VkDevice m_device = VK_NULL_HANDLE;
         VkQueue m_computeQueue = VK_NULL_HANDLE;
         uint32_t m_computeQueueFamilyIndex = 0;
-        VkSemaphore m_computeTimelineSemaphore = VK_NULL_HANDLE;
-        uint64_t m_computeTimelineValue = 0;
         VkQueue m_graphicsQueue = VK_NULL_HANDLE;
         uint32_t m_graphicsQueueFamilyIndex = 0;
-        VkSemaphore m_graphicsTimelineSemaphore = VK_NULL_HANDLE;
-        uint64_t m_graphicsTimelineValue = 0;
         VkQueue m_transferQueue = VK_NULL_HANDLE;
         uint32_t m_transferQueueFamilyIndex = 0;
-        VkSemaphore m_transferTimelineSemaphore = VK_NULL_HANDLE;
-        uint64_t m_transferTimelineValue = 0;
 
         VmaAllocator m_allocator = VK_NULL_HANDLE;
         VkPipelineCache m_pipelineCache = VK_NULL_HANDLE;

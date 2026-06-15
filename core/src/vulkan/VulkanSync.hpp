@@ -84,8 +84,24 @@ namespace rhi::vk{
         case rhi::Format::R16G16B16A16_Unorm: return VK_FORMAT_R16G16B16A16_UNORM;
         case rhi::Format::D32_Sfloat: return VK_FORMAT_D32_SFLOAT;
         case rhi::Format::D24_Unorm: return VK_FORMAT_X8_D24_UNORM_PACK32;
+        case rhi::Format::B8G8R8A8_Unorm: return VK_FORMAT_B8G8R8A8_UNORM;
+        case rhi::Format::B8G8R8A8_SRGB: return VK_FORMAT_B8G8R8A8_SRGB;
         default:
             throw std::runtime_error("vkAsync: Unsupported format!");
+        }
+    }
+
+    inline rhi::Format mapToRHIFormat(VkFormat vkFormat) {
+        switch (vkFormat) {
+        case VK_FORMAT_R8G8B8A8_UNORM: return rhi::Format::R8G8B8A8_Unorm;
+        case VK_FORMAT_B8G8R8A8_UNORM: return rhi::Format::B8G8R8A8_Unorm;
+        case VK_FORMAT_B8G8R8A8_SRGB: return rhi::Format::B8G8R8A8_SRGB;
+        case VK_FORMAT_R32G32B32A32_SFLOAT: return rhi::Format::R32G32B32A32_Sfloat;
+        case VK_FORMAT_R16G16B16A16_UNORM: return rhi::Format::R16G16B16A16_Unorm;
+        case VK_FORMAT_D32_SFLOAT: return rhi::Format::D32_Sfloat;
+        case VK_FORMAT_X8_D24_UNORM_PACK32: return rhi::Format::D24_Unorm;
+        default:
+            throw std::runtime_error("vkAsync: Unsupported VkFormat!");
         }
     }
 

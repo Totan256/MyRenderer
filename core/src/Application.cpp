@@ -13,7 +13,7 @@ namespace core {
     // Application.hpp の m_impl の実体定義
     struct Application::Impl {
         std::unique_ptr<core::Window> window;
-        std::shared_ptr<rhi::Swapchain> swapchain;
+        std::unique_ptr<rhi::Swapchain> swapchain;
                 
         uint32_t width = 1280;
         uint32_t height = 720;

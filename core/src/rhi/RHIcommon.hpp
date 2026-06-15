@@ -69,6 +69,8 @@ namespace rhi {
 
     enum class Format {
         R8G8B8A8_Unorm,
+        B8G8R8A8_Unorm,
+        B8G8R8A8_SRGB,
         R16G16B16A16_Unorm,
         R32G32B32A32_Sfloat,
         D32_Sfloat,

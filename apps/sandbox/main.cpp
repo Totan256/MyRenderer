@@ -25,13 +25,14 @@ public:
                             graph->importResource(backBuffer3, "BackBuffer"_hash) };
 
         // 3. パスの追加 (例: 画面を単色でクリアするだけのパス)
-        auto& mainPass = graph->addGraphicsPass("MainPass", "shaders/test.vert", "shaders/test.frag");
+        auto& mainPass = graph->addGraphicsPass("MainPass", "shaders/test.vert", "shaders/test.frag")
+            .addColorOutput(0, hOutput[0], rhi::LoadOp::Clear, rhi::StoreOp::Store, { 0.1f, 0.2f, 0.3f, 1.0f });
             // ※ ここに実際の描画処理 (drawなど) を追加していきます
 
         // 4. コンパイル
         graph->compile();
 
-        while (isRunning()) {
+        for (int frame = 0; frame < 4; ++frame) {
             processEvents();
 
             // フレームの開始

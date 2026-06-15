@@ -9,18 +9,41 @@
 #include <map>
 
 namespace rhi::vk {
+    struct CommandPoolData {
+        VkCommandPool pool = VK_NULL_HANDLE;
+        std::vector<std::unique_ptr<VulkanCommandList>> commandLists;
+        uint32_t activeCount = 0; // そのフレームで使用中のコマンドリスト数
+    };
+
+    struct PerFrameData {
+        std::map<QueueType, CommandPoolData> pools;
+    };
+
+    struct RenderScope {
+        bool isGraphics = false;
+        std::vector<uint32_t> passIndices;
+
+        // Graphicsの場合、スコープの開始時に渡すアタッチメント情報
+        std::vector<VulkanCommandList::RenderAttachment> colorAtts;
+        std::optional<VulkanCommandList::RenderAttachment> depthAtt;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+    
     struct RenderBatch {
         QueueType queueType;
-        // このバッチが実行される前にGPUで完了していなければならないSyncPointのリスト
-        std::vector<SyncPoint> waitSyncPoints;
-        // このバッチが完了したときにシグナルされるSyncPoint
-        SyncPoint signalSyncPoint;
-        std::vector<uint32_t> passIndices;
-        // std::vector<VkSemaphore> waitSemaphores;
-        // std::vector<VkPipelineStageFlags> waitStages;
-        // std::vector<VkSemaphore> signalSemaphores;
-        VulkanCommandList* commandList = nullptr;
-        
+        struct RelativeSync {
+            QueueType queueType;
+            uint32_t offset;
+        };
+        // compile時に決まる相対的な依存関係
+        std::vector<RelativeSync> relativeWaitPoints;
+        uint32_t relativeSignalOffset = 0;
+        // execute時に計算される絶対的な同期ポイント
+        std::vector<SyncPoint> runtimeWaitSyncPoints;
+        SyncPoint runtimeSignalSyncPoint;
+
+        std::vector<RenderScope> scopes;
         std::vector<VkImageMemoryBarrier2> imageBarriers;
         std::vector<VkBufferMemoryBarrier2> bufferBarriers;
         std::vector<VkImageMemoryBarrier2> postImageBarriers;
@@ -34,7 +57,7 @@ namespace rhi::vk {
 
     class VulkanRenderGraph : public RenderGraph {
     public:
-        VulkanRenderGraph(VulkanDevice& device) : m_device(device), m_resourceAllocator(device, MAX_FRAMES_IN_FLIGHT) {}
+        VulkanRenderGraph(VulkanDevice& device);
         ~VulkanRenderGraph() override;
 
         ComputePass& addComputePass(const std::string& name, const std::string& shaderPath, QueueType queueType = QueueType::Compute) override;
@@ -68,6 +91,10 @@ namespace rhi::vk {
         std::vector<VkSemaphore> m_batchSemaphores;
         std::vector<SwapchainSync> m_swapchainSyncs;
 
+        std::array<PerFrameData, MAX_FRAMES_IN_FLIGHT> m_frameData;
         void clearBatchSemaphores();
+
+        // 各キューで現在の最大オフセットを追跡（次の同期ポイントを計算するため）
+        std::map<QueueType, uint32_t> m_queueMaxOffsets;
     };
 }

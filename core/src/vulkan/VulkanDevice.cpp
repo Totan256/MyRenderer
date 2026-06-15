@@ -464,12 +464,11 @@ namespace rhi::vk{
             vkDestroyPipelineCache(m_device, m_pipelineCache, nullptr);
         }
 
+        m_timelineSemaphores.clear();
+
         if (m_bindlessLayout) vkDestroyDescriptorSetLayout(m_device, m_bindlessLayout, nullptr);
         if (m_bindlessPool) vkDestroyDescriptorPool(m_device, m_bindlessPool, nullptr);
         if (m_allocator) vmaDestroyAllocator(m_allocator);
-        if (m_graphicsTimelineSemaphore) vkDestroySemaphore(m_device, m_graphicsTimelineSemaphore, nullptr);
-        if (m_computeTimelineSemaphore) vkDestroySemaphore(m_device, m_computeTimelineSemaphore, nullptr);
-        if (m_transferTimelineSemaphore) vkDestroySemaphore(m_device, m_transferTimelineSemaphore, nullptr);
         if (m_device) vkDestroyDevice(m_device, nullptr);
         if (m_instance) vkDestroyInstance(m_instance, nullptr);
         
@@ -775,48 +774,32 @@ namespace rhi::vk{
     }
 
     void VulkanDevice::createTimelineSemaphores() {
-        VkSemaphoreTypeCreateInfo timelineCreateInfo{};
-        timelineCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-        timelineCreateInfo.pNext = nullptr;
-        timelineCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-        timelineCreateInfo.initialValue = 0;
-
-        VkSemaphoreCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        createInfo.pNext = &timelineCreateInfo;
-        createInfo.flags = 0;
-
-        if (vkCreateSemaphore(m_device, &createInfo, nullptr, &m_graphicsTimelineSemaphore) != VK_SUCCESS ||
-            vkCreateSemaphore(m_device, &createInfo, nullptr, &m_transferTimelineSemaphore) != VK_SUCCESS ||
-            vkCreateSemaphore(m_device, &createInfo, nullptr, &m_computeTimelineSemaphore) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create timeline semaphores!");
-        }
+        m_timelineSemaphores[QueueType::Graphics] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Graphics);
+        m_timelineSemaphores[QueueType::Compute]  = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Compute);
+        m_timelineSemaphores[QueueType::Transfer] = std::make_unique<VulkanTimelineSemaphore>(*this, QueueType::Transfer);
     }
 
     SyncPoint VulkanDevice::advanceTimeline(QueueType type) {
         SyncPoint sp;
         sp.queueType = type;
-        switch (type) {
-            case QueueType::Graphics: sp.value = ++m_graphicsTimelineValue; break;
-            case QueueType::Transfer: sp.value = ++m_transferTimelineValue; break;
-            case QueueType::Compute:  sp.value = ++m_computeTimelineValue; break;
-        }
+        sp.value = m_timelineSemaphores.at(type)->advanceAndGetNextValue();
         return sp;
     }
 
     uint64_t VulkanDevice::getCompletedTimelineValue(QueueType type) {
-        uint64_t value = 0;
-        vkGetSemaphoreCounterValue(m_device, getTimelineSemaphore(type), &value);
-        return value;
+        return m_timelineSemaphores.at(type)->getCompletedValue();
     }
 
     VkSemaphore VulkanDevice::getTimelineSemaphore(QueueType type) const {
-        switch (type) {
-            case QueueType::Graphics: return m_graphicsTimelineSemaphore;
-            case QueueType::Transfer: return m_transferTimelineSemaphore;
-            case QueueType::Compute:  return m_computeTimelineSemaphore;
-            default: return VK_NULL_HANDLE;
+        auto it = m_timelineSemaphores.find(type);
+        if (it != m_timelineSemaphores.end()) {
+            return it->second->getHandle();
         }
+        return VK_NULL_HANDLE;
+    }
+
+    VulkanTimelineSemaphore& VulkanDevice::getTimelineSemaphoreObject(QueueType type) {
+        return *m_timelineSemaphores.at(type);
     }
 
     void VulkanDevice::waitTimeline(const std::vector<SyncPoint>& syncPoints, uint64_t timeoutNs) {
@@ -838,38 +821,4 @@ namespace rhi::vk{
         
         vkWaitSemaphores(m_device, &waitInfo, timeoutNs);
     }
-
-    // bool VulkanDevice::waitSyncPoints(const std::vector<rhi::SyncPoint>& points, uint64_t timeoutNs) {
-    //     if (points.empty()) return true;
-
-    //     std::vector<VkSemaphore> semaphores;
-    //     std::vector<uint64_t> waitValues;
-    //     semaphores.reserve(points.size());
-    //     waitValues.reserve(points.size());
-
-    //     // 既に完了しているものを除外する最適化
-    //     for (const auto& point : points) {
-    //         auto& timelineSem = getTimelineSemaphore(point.queueType);
-    //         if (timelineSem.getCompletedValue() < point.value) {
-    //             semaphores.push_back(timelineSem.getHandle());
-    //             waitValues.push_back(point.value);
-    //         }
-    //     }
-
-    //     if (semaphores.empty()) return true;
-
-    //     VkSemaphoreWaitInfo waitInfo{};
-    //     waitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
-    //     waitInfo.pNext = nullptr;
-    //     waitInfo.flags = 0; // 全て完了するまで待つ
-    //     waitInfo.semaphoreCount = static_cast<uint32_t>(semaphores.size());
-    //     waitInfo.pSemaphores = semaphores.data();
-    //     waitInfo.pValues = waitValues.data();
-
-    //     VkResult result = vkWaitSemaphores(getDevice(), &waitInfo, timeoutNs);
-    //     if (result == VK_SUCCESS) return true;
-    //     if (result == VK_TIMEOUT) return false;
-        
-    //     throw std::runtime_error("Failed to wait on multiple timeline semaphores");
-    // }
 }

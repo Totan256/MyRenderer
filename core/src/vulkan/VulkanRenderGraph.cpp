@@ -27,23 +27,61 @@ namespace rhi::vk {
         }
     };
 
+    void BuildScopeAttachments(rhi::vk::RenderScope& scope, 
+        const rhi::GraphicsPass* pass, rhi::vk::VulkanResourceAllocator& allocator) {
+        scope.colorAtts.clear();
+        scope.depthAtt = std::nullopt;
+        scope.width = 0;
+        scope.height = 0;
+        // カラーアタッチメントの構築
+        for (const auto& [location, att] : pass->getColorAttachments()) {
+            rhi::vk::VulkanImage* img = allocator.getPhysicalImage(att.handle);
+            if (!img) continue;
+            // スコープの解像度を設定（最初のアタッチメントのサイズを採用）
+            if (scope.width == 0 || scope.height == 0) { 
+                scope.width = img->getDesc().width; 
+                scope.height = img->getDesc().height; 
+            }
+            VkClearValue clearVal{};
+            clearVal.color = {{
+                att.clearValue.r, 
+                att.clearValue.g, 
+                att.clearValue.b, 
+                att.clearValue.a
+            }};
+            scope.colorAtts.push_back({ 
+                img->getView(), 
+                mapLoadOp(att.loadOp), 
+                mapStoreOp(att.storeOp), 
+                clearVal 
+            });
+        }
+        // 深度アタッチメントの構築
+        if (pass->getDepthAttachment().has_value()) {
+            const auto& depthAtt = pass->getDepthAttachment().value();
+            rhi::vk::VulkanImage* depthImg = allocator.getPhysicalImage(depthAtt.handle);
+            if (depthImg) {
+                if (scope.width == 0 || scope.height == 0) { 
+                    scope.width = depthImg->getDesc().width; 
+                    scope.height = depthImg->getDesc().height; 
+                }
+                VkClearValue clearVal{};
+                clearVal.depthStencil = { 
+                    depthAtt.clearValue.depth, 
+                    depthAtt.clearValue.stencil 
+                };
+                scope.depthAtt = rhi::vk::VulkanCommandList::RenderAttachment{ 
+                    depthImg->getView(), 
+                    mapLoadOp(depthAtt.loadOp), 
+                    mapStoreOp(depthAtt.storeOp), 
+                    clearVal 
+                };
+            }
+        }
+    }
+
     namespace {
-        // void CollectRequirements(
-        //     rhi::RenderPass* pass,
-        //     const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
-        //     std::set<rhi::ResourceHandle>& seenHandles,
-        //     rhi::ShaderStage stage) 
-        // {
-        //     const auto& signature = pass->getSignature();
-        //     for (const auto& [offset, handle] : resourceOffsets) {
-        //         auto it = signature.find(offset);
-        //         if (it != signature.end()) {
-        //             if (seenHandles.insert(handle).second) {
-        //                 pass->addRequirement(handle, it->second, stage);
-        //             }
-        //         }
-        //     }
-        // }
+        
 
         struct PushConstantPack {
             std::array<uint8_t, MAX_PUSH_CONSTANT_SIZE> data{};
@@ -131,7 +169,7 @@ namespace rhi::vk {
             auto& vkDevice = static_cast<VulkanDevice&>(device);
             auto& graph = static_cast<VulkanRenderGraph&>(m_graph);
             std::vector<VkFormat> vkColorFormats;
-            for (const auto& att : m_colorAttachments) {
+            for (const auto& [location, att] : m_colorAttachments) {
                 const auto& reg = graph.getRegistration(att.handle);
                 if (reg.isImported && reg.physicalResource && reg.physicalResource->isImage()) {
                     vkColorFormats.push_back(mapFormat(static_cast<VulkanImage*>(reg.physicalResource)->getDesc().format));
@@ -167,29 +205,8 @@ namespace rhi::vk {
             VkCommandBuffer cmdBuf = vkCmd.getCommandBuffer();
             auto& allocator = static_cast<VulkanRenderGraph&>(m_graph).getAllocator();
             if (m_pipeline) {
-                std::vector<VulkanCommandList::RenderAttachment> vkColorAtts;
-                std::optional<VulkanCommandList::RenderAttachment> vkDepthAtt = std::nullopt;
-                uint32_t width = 0, height = 0;
-                std::vector<ColorAttachmentInfo> sortedAtts = m_colorAttachments;
-                std::sort(sortedAtts.begin(), sortedAtts.end(), [](const auto& a, const auto& b){ return a.location < b.location; });
                 
-                for (const auto& att : sortedAtts) {
-                    VulkanImage* img = allocator.getPhysicalImage(att.handle);
-                    if (width == 0) { width = img->getDesc().width; height = img->getDesc().height; }
-                    VkClearValue clearVal{};
-                    clearVal.color = {{att.clearValue.r, att.clearValue.g, att.clearValue.b, att.clearValue.a}};
-                    vkColorAtts.push_back({ img->getView(), mapLoadOp(att.loadOp), mapStoreOp(att.storeOp), clearVal });
-                }
-                if (m_depthAttachment.has_value()) {
-                    VulkanImage* depthImg = allocator.getPhysicalImage(m_depthAttachment->handle);
-                    if (width == 0) { width = depthImg->getDesc().width; height = depthImg->getDesc().height; }
-                    VkClearValue clearVal{};
-                    clearVal.depthStencil = { m_depthAttachment->clearValue.depth, m_depthAttachment->clearValue.stencil };
-                    vkDepthAtt = { depthImg->getView(), mapLoadOp(m_depthAttachment->loadOp), mapStoreOp(m_depthAttachment->storeOp), clearVal };
-                }
-                if (width == 0 || height == 0) return;
-                const VulkanCommandList::RenderAttachment* pDepthAtt = vkDepthAtt.has_value() ? &vkDepthAtt.value() : nullptr;
-                vkCmd.beginRendering(vkColorAtts, pDepthAtt, width, height);
+                // vkCmd.beginRendering(vkColorAtts, pDepthAtt, width, height);
 
                 vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline->getPipeline());
                 VkDescriptorSet globalSet = static_cast<VulkanDevice&>(m_graph.getDevice()).getBindlessDescriptorSet();
@@ -217,7 +234,7 @@ namespace rhi::vk {
                         vkCmd.draw(state.vertexCount, state.instanceCount, state.firstVertex, state.firstInstance);
                     }
                 }
-                vkCmd.endRendering();
+                // vkCmd.endRendering();
             }
         }
     private:
@@ -237,8 +254,10 @@ namespace rhi::vk {
             VkCommandBuffer cmdBuf = vkCmd.getCommandBuffer();
             auto& allocator = static_cast<VulkanRenderGraph&>(m_graph).getAllocator();
 
-            bool srcIsImage = m_graph.getRegistration(m_src).isImage();
-            bool dstIsImage = m_graph.getRegistration(m_dst).isImage();
+            auto& srcReg = m_graph.getRegistration(m_src);
+            bool srcIsImage = srcReg.isImported ? (srcReg.physicalResource && srcReg.physicalResource->isImage()) : srcReg.isImage();
+            auto& dstReg = m_graph.getRegistration(m_dst);
+            bool dstIsImage = dstReg.isImported ? (dstReg.physicalResource && dstReg.physicalResource->isImage()) : dstReg.isImage();
 
             if (srcIsImage && !dstIsImage) {
                 VulkanImage* physSrcImg = allocator.getPhysicalImage(m_src);
@@ -311,14 +330,29 @@ namespace rhi::vk {
         std::vector<ResourceHandle> m_images;
     };
 
-    VulkanRenderGraph::~VulkanRenderGraph() {
-        clearBatchSemaphores();
-        for (auto& batch : m_batches) {
-            if (batch.commandList) {
-                delete batch.commandList;
-                batch.commandList = nullptr;
+    VulkanRenderGraph::VulkanRenderGraph(VulkanDevice& device)  : m_device(device), m_resourceAllocator(device, MAX_FRAMES_IN_FLIGHT) {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            for (QueueType type : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
+                VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+                // TRANSIENT_BIT は頻繁にリセットされるプールに最適
+                poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT; 
+                poolInfo.queueFamilyIndex = m_device.getQueueFamilyIndex(type);
+                
+                vkCreateCommandPool(m_device.getDevice(), &poolInfo, nullptr, &m_frameData[i].pools[type].pool);
             }
         }
+    }
+
+    VulkanRenderGraph::~VulkanRenderGraph() {
+        clearBatchSemaphores();
+        for (auto& frame : m_frameData) {
+        for (auto& [type, data] : frame.pools) {
+            data.commandLists.clear(); // VulkanCommandListのデストラクタが呼ばれる (m_ownsPool=falseなのでプール自体は消さない)
+            if (data.pool != VK_NULL_HANDLE) {
+                vkDestroyCommandPool(m_device.getDevice(), data.pool, nullptr);
+            }
+        }
+    }
         m_batches.clear();
     }
 
@@ -445,25 +479,62 @@ namespace rhi::vk {
 
         // 3. Batch Division
         m_batches.clear();
+        m_queueMaxOffsets.clear();
         QueueType currentQueue = QueueType::Compute; 
         RenderBatch* currentBatch = nullptr;
+        RenderScope* currentScope = nullptr;
         std::vector<uint32_t> passToBatch(m_passes.size(), 0);
+
+        auto isSameAttachmentConfig = [](GraphicsPass* a, GraphicsPass* b) {
+            if (a->getColorAttachments().size() != b->getColorAttachments().size()) return false;
+            for (const auto& [loc, attA] : a->getColorAttachments()) {
+                auto it = b->getColorAttachments().find(loc);
+                if (it == b->getColorAttachments().end() || it->second.handle != attA.handle) return false;
+            }
+            if (a->getDepthAttachment().has_value() != b->getDepthAttachment().has_value()) return false;
+            if (a->getDepthAttachment().has_value()) {
+                if (a->getDepthAttachment()->handle != b->getDepthAttachment()->handle) return false;
+            }
+            return true;
+        };
 
         for (uint32_t passIdx : sortedIndices) {
             auto& pass = m_passes[passIdx];
-            bool shouldBreak = (currentBatch == nullptr) || (pass->getQueueType() != currentQueue) || (pass->isForceBatchBreak());
-            if (shouldBreak) {
+            bool shouldBreakBatch = (currentBatch == nullptr) || (pass->getQueueType() != currentQueue) || pass->isForceBatchBreak();
+            
+            if (shouldBreakBatch) {
                 m_batches.push_back({});
                 currentBatch = &m_batches.back();
                 currentBatch->queueType = pass->getQueueType();
-                currentBatch->commandList = new VulkanCommandList(m_device, pass->getQueueType()); // メモリリーク注意：今回はプロトタイピングのまま
                 currentQueue = pass->getQueueType();
-
-                // 新しいバッチの SignalSyncPoint を発行
-                currentBatch->signalSyncPoint = m_device.advanceTimeline(currentQueue);
+                m_queueMaxOffsets[currentQueue]++;
+                currentBatch->relativeSignalOffset = m_queueMaxOffsets[currentQueue];
+                currentScope = nullptr;
             }
-            currentBatch->passIndices.push_back(passIdx);
+            
             passToBatch[passIdx] = m_batches.size() - 1;
+
+            // スコープの構築とマージ判定
+            bool isGraphics = pass->getType() == PassType::Graphics;
+            bool canMerge = false;
+
+            if (isGraphics && currentScope && currentScope->isGraphics) {
+                GraphicsPass* currentPassGfx = static_cast<GraphicsPass*>(pass.get());
+                GraphicsPass* scopeFirstPassGfx = static_cast<GraphicsPass*>(m_passes[currentScope->passIndices.front()].get());
+                canMerge = isSameAttachmentConfig(currentPassGfx, scopeFirstPassGfx);
+            }
+
+            if (!canMerge) {
+                // マージできない場合は新しいスコープを作成
+                currentBatch->scopes.push_back({});
+                currentScope = &currentBatch->scopes.back();
+                currentScope->isGraphics = isGraphics;
+
+                if (isGraphics) {
+                    BuildScopeAttachments(*currentScope, static_cast<GraphicsPass*>(pass.get()), m_resourceAllocator);
+                }
+            }
+            currentScope->passIndices.push_back(passIdx);
         }
 
         std::cout << "Total Passes: " << m_passes.size() << ", Total Batches: " << m_batches.size() << std::endl;
@@ -488,13 +559,16 @@ namespace rhi::vk {
                 const auto& req = pass->getRequirements()[i];
                 VulkanResourceState next = MapResourceState(req.state, req.stage);
                 
+                const auto& reg = m_resourceRegistry[h];
+                bool isImg = reg.isImported ? (reg.physicalResource && reg.physicalResource->isImage()) : reg.isImage();
+                
                 if (currentStates.count(h)) {
                     auto& prevTrack = currentStates[h];
                     uint32_t prevQueueFamily = m_device.getQueueFamilyIndex(prevTrack.queueType);
                     uint32_t prevBatchIdx = passToBatch[prevTrack.lastPassIdx];
                     
                     if (prevQueueFamily != currentQueueFamily) {
-                        if (m_resourceRegistry[h].isImage()) {
+                        if (isImg) {
                             VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(h);
                             VkImage img = physImg->getImage();
                             
@@ -530,7 +604,7 @@ namespace rhi::vk {
                         }
                     } else {
                         if (prevTrack.state.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
-                            if (m_resourceRegistry[h].isImage()) {
+                            if (isImg) {
                                 auto physImg = m_resourceAllocator.getPhysicalImage(h);
                                 VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                                 imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -562,7 +636,7 @@ namespace rhi::vk {
                         prev = MapResourceState(currState, currStage);
                     }
 
-                    if (m_resourceRegistry[h].isImage()) {
+                    if (isImg) {
                         VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                         imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -590,27 +664,18 @@ namespace rhi::vk {
             }
         }
         std::cout << "Barrier Insertion Done." << std::endl;
-        // --- SyncPoint Tracking ---
+        // --- 5. SyncPoint Tracking ---
         struct ResourceSyncState {
-            SyncPoint writeSync = {QueueType::Compute, 0};
-            std::vector<SyncPoint> readSyncs;
+            RenderBatch::RelativeSync writeSync = {QueueType::Compute, 0};
+            std::vector<RenderBatch::RelativeSync> readSyncs;
         };
         std::map<rhi::ResourceHandle, ResourceSyncState> currentSyncStates;
 
-        // Initialize from imported physical resources
-        for (size_t i = 0; i < m_resourceRegistry.size(); ++i) {
-            const auto& reg = m_resourceRegistry[i];
-            if (reg.isImported && reg.physicalResource) {
-                currentSyncStates[i].writeSync = reg.physicalResource->getWriteSync();
-                currentSyncStates[i].readSyncs = reg.physicalResource->getReadSyncs();
-            }
-        }
-
-        auto addWaitSync = [](std::vector<SyncPoint>& waits, SyncPoint sp) {
-            if (sp.value == 0) return;
+        auto addRelativeWait = [](std::vector<RenderBatch::RelativeSync>& waits, RenderBatch::RelativeSync sp) {
+            if (sp.offset == 0) return;
             for (auto& w : waits) {
                 if (w.queueType == sp.queueType) {
-                    w.value = std::max(w.value, sp.value);
+                    w.offset = std::max(w.offset, sp.offset);
                     return;
                 }
             }
@@ -619,8 +684,7 @@ namespace rhi::vk {
 
         for (uint32_t passIdx : sortedIndices) {
             auto& pass = m_passes[passIdx];
-            uint32_t batchIdx = passToBatch[passIdx];
-            RenderBatch& batch = m_batches[batchIdx];
+            RenderBatch& batch = m_batches[passToBatch[passIdx]];
 
             for (size_t i = 0; i < pass->getResourceHandles().size(); ++i) {
                 rhi::ResourceHandle h = pass->getResourceHandles()[i];
@@ -628,57 +692,45 @@ namespace rhi::vk {
                 auto& syncState = currentSyncStates[h];
 
                 if (isWriteUsage(req.state)) {
-                    if (syncState.writeSync.value > 0 && syncState.writeSync.queueType != batch.queueType) {
-                        addWaitSync(batch.waitSyncPoints, syncState.writeSync);
+                    if (syncState.writeSync.offset > 0 && syncState.writeSync.queueType != batch.queueType) {
+                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync);
                     }
                     for (const auto& rs : syncState.readSyncs) {
-                        if (rs.value > 0 && rs.queueType != batch.queueType) {
-                            addWaitSync(batch.waitSyncPoints, rs);
+                        if (rs.offset > 0 && rs.queueType != batch.queueType) {
+                            addRelativeWait(batch.relativeWaitPoints, rs);
                         }
                     }
-                    syncState.writeSync = batch.signalSyncPoint;
+                    syncState.writeSync = {batch.queueType, batch.relativeSignalOffset};
                     syncState.readSyncs.clear();
                 } else {
-                    if (syncState.writeSync.value > 0 && syncState.writeSync.queueType != batch.queueType) {
-                        addWaitSync(batch.waitSyncPoints, syncState.writeSync);
+                    if (syncState.writeSync.offset > 0 && syncState.writeSync.queueType != batch.queueType) {
+                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync);
                     }
                     bool found = false;
                     for (auto& rs : syncState.readSyncs) {
                         if (rs.queueType == batch.queueType) {
-                            rs.value = std::max(rs.value, batch.signalSyncPoint.value);
-                            found = true;
-                            break;
+                            rs.offset = std::max(rs.offset, batch.relativeSignalOffset);
+                            found = true; break;
                         }
                     }
-                    if (!found) {
-                        syncState.readSyncs.push_back(batch.signalSyncPoint);
-                    }
-                }
-            }
-        }
-
-        std::cout << "Final SyncStates Applied." << std::endl;
-        // Apply final SyncStates back to physical resources
-        for (auto& [h, syncState] : currentSyncStates) {
-            const auto& reg = m_resourceRegistry[h];
-            if (reg.isImported && reg.physicalResource) {
-                reg.physicalResource->setWriteSync(syncState.writeSync);
-                reg.physicalResource->clearReadSyncs();
-                for (const auto& rs : syncState.readSyncs) {
-                    reg.physicalResource->addReadSync(rs);
+                    if (!found) syncState.readSyncs.push_back({batch.queueType, batch.relativeSignalOffset});
                 }
             }
         }
         std::cout << "Physical Resource SyncStates Updated." << std::endl;
+        // --- Swapchain Sync Tracking ---
         for (const auto& [h, track] : currentStates) {
             const auto& reg = m_resourceRegistry[h];
-            if (reg.isImage() && reg.isImported && reg.physicalResource) {
+            bool isImg = reg.isImported ? (reg.physicalResource && reg.physicalResource->isImage()) : reg.isImage();
+            if (isImg && reg.isImported && reg.physicalResource) {
                 VulkanImage* physImg = static_cast<VulkanImage*>(reg.physicalResource);
+                std::cout<<"test_swapchain"<<std::endl;
                 if (physImg->isSwapchainImage()) {
                     rhi::Swapchain* swapchain = physImg->getSwapchain();                    
                     uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
                     uint32_t firstBatchIdx = passToBatch[firstPassIdx];
-                    uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];                    
+                    uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];
+                    std::cout << "Swapchain Image Detected: Resource " << h << ", First Batch " << firstBatchIdx << ", Last Batch " << lastBatchIdx << std::endl;
                     m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
                     VkImageMemoryBarrier2 presentBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
                     presentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -701,6 +753,28 @@ namespace rhi::vk {
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
         std::cout << "Executing RenderGraph..." << std::endl;
+        std::map<QueueType, uint64_t> queueBaseValues;
+        for (QueueType type : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
+            queueBaseValues[type] = m_device.getTimelineSemaphoreObject(type).getCurrentValue();
+        }
+        for (auto& batch : m_batches) {
+            batch.runtimeSignalSyncPoint = { batch.queueType, queueBaseValues[batch.queueType] + batch.relativeSignalOffset };
+            batch.runtimeWaitSyncPoints.clear();
+            for (const auto& relWait : batch.relativeWaitPoints) {
+                batch.runtimeWaitSyncPoints.push_back({
+                    relWait.queueType, 
+                    queueBaseValues[relWait.queueType] + relWait.offset
+                });
+            }
+        }
+
+        // プール全体を一括リセット
+        uint32_t frameIdx = m_device.getCurrentFrame() % MAX_FRAMES_IN_FLIGHT;
+        auto& currentFrameData = m_frameData[frameIdx];
+        for (auto& [type, poolData] : currentFrameData.pools) {
+            vkResetCommandPool(m_device.getDevice(), poolData.pool, 0);
+            poolData.activeCount = 0; // 使用カウントをリセット
+        }
         auto asyncSems = m_device.getUploadManager()->consumeAsyncSyncPoints();
         std::vector<SyncPoint> combinedAsyncWaits = asyncSems;
 
@@ -721,9 +795,14 @@ namespace rhi::vk {
 
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
             auto& batch = m_batches[batchIdx];
-            batch.commandList->reset();
-            batch.commandList->begin();
-            auto vkCmdBuf = static_cast<VulkanCommandList*>(batch.commandList)->getCommandBuffer();
+            auto& poolData = currentFrameData.pools[batch.queueType];
+            if (poolData.activeCount >= poolData.commandLists.size()) {
+                // 足りない場合のみ新しいコマンドバッファをプールから確保
+                poolData.commandLists.push_back(std::make_unique<VulkanCommandList>(m_device, batch.queueType, poolData.pool));
+            }
+            VulkanCommandList* cmdList = poolData.commandLists[poolData.activeCount++].get();
+            cmdList->begin();
+            auto vkCmdBuf = cmdList->getCommandBuffer();
 
             if (!batch.imageBarriers.empty() || !batch.bufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
@@ -734,8 +813,23 @@ namespace rhi::vk {
                 vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
             }
 
-            for (uint32_t passIdx : batch.passIndices) {
-                executePass(m_passes[passIdx].get(), *batch.commandList);
+            for (auto& scope : batch.scopes) {
+                if (scope.isGraphics) {
+                    const auto* pDepthAtt = scope.depthAtt.has_value() ? &scope.depthAtt.value() : nullptr;
+                    // スコープの開始（レンダーターゲットのバインド）
+                    cmdList->beginRendering(scope.colorAtts, pDepthAtt, scope.width, scope.height);
+                    // スコープ内のパスを実行（パイプラインバインドとドローコールのみ）
+                    for (uint32_t passIdx : scope.passIndices) {
+                        executePass(m_passes[passIdx].get(), *cmdList);
+                    }
+                    // スコープの終了
+                    cmdList->endRendering();
+                } else {
+                    // Compute, Copy等のパス
+                    for (uint32_t passIdx : scope.passIndices) {
+                        executePass(m_passes[passIdx].get(), *cmdList);
+                    }
+                }
             }
 
             // パス実行後のバリア (Presentへの遷移など) を発行
@@ -746,7 +840,7 @@ namespace rhi::vk {
                 vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
             }
 
-            batch.commandList->end();
+            cmdList->end();
 
             // キューの切り替え判定
             VkQueue queue = m_device.getQueue(batch.queueType);
@@ -759,8 +853,7 @@ namespace rhi::vk {
             std::vector<VkSemaphoreSubmitInfo> currentWaitInfos;
             std::vector<VkSemaphoreSubmitInfo> currentSignalInfos;
 
-            // --- タイムラインセマフォからの Wait 構築 ---
-            for (const auto& sp : batch.waitSyncPoints) {
+            for (const auto& sp : batch.runtimeWaitSyncPoints) {
                 VkSemaphore sem = m_device.getTimelineSemaphore(sp.queueType);
                 if (sem != VK_NULL_HANDLE && sp.value > 0) {
                     VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
@@ -809,11 +902,11 @@ namespace rhi::vk {
             }
 
             // --- タイムラインセマフォへの Signal 構築 ---
-            VkSemaphore sigSem = m_device.getTimelineSemaphore(batch.signalSyncPoint.queueType);
+            VkSemaphore sigSem = m_device.getTimelineSemaphore(batch.runtimeSignalSyncPoint.queueType);
             if (sigSem != VK_NULL_HANDLE) {
                 VkSemaphoreSubmitInfo signalInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
                 signalInfo.semaphore = sigSem;
-                signalInfo.value = batch.signalSyncPoint.value;
+                signalInfo.value = batch.runtimeSignalSyncPoint.value; // 絶対値を使用
                 signalInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
                 currentSignalInfos.push_back(signalInfo);
             }
@@ -867,6 +960,11 @@ namespace rhi::vk {
             }
             // バッチごとに vkQueueSubmit2 にて実行
             VK_CHECK(vkQueueSubmit2(sb.queue, (uint32_t)sb.submits.size(), sb.submits.data(), sb.fence));
+        }
+        for (const auto& [type, maxOffset] : m_queueMaxOffsets) {
+            for (uint64_t i = 0; i < maxOffset; ++i) {
+                m_device.getTimelineSemaphoreObject(type).advanceAndGetNextValue();
+            }
         }
     }
 }

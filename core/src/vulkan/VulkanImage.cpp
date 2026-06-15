@@ -53,14 +53,27 @@ namespace rhi::vk{
     VulkanImage::VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent, rhi::Swapchain* swapchain)
         : m_device(device), m_image(existingImage), m_isOwned(false) // 所有権は持たない
     {
-        // 必要に応じてImageDescのダミー値を埋める（RenderGraph等でサイズを参照できるようにするため）
-        m_desc.width = extent.width;
+       m_desc.width = extent.width;
         m_desc.height = extent.height;
         m_desc.depth = extent.depth;
-        // format は ImageDesc の型 (rhi::Format) に変換して入れるか、必要に応じて保持
         
-        // ※注意: スワップチェーン画像用の VkImageView をここで作成する処理が必要になる場合があります
-        // (通常は VkImageViewCreateInfo を使って m_view を作成します)
+        m_desc.format = mapToRHIFormat(format);
+
+        // ImageViewの作成
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = m_image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(m_device.getDevice(), &viewInfo, nullptr, &m_view) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create image view for swapchain image!");
+        }
     }
 
     VulkanImage::~VulkanImage(){
