@@ -17,7 +17,20 @@ namespace rhi::vk {
     }
 
     VulkanSwapchain::~VulkanSwapchain() {
+        vkDeviceWaitIdle(m_device.getDevice());
         cleanup();
+        for (auto sem : m_acquireSemaphores) {
+            if (sem != VK_NULL_HANDLE) {
+                vkDestroySemaphore(m_device.getDevice(), sem, nullptr);
+            }
+        }
+        for (auto sem : m_presentSemaphores) {
+            if (sem != VK_NULL_HANDLE) {
+                vkDestroySemaphore(m_device.getDevice(), sem, nullptr);
+            }
+        }
+        m_acquireSemaphores.clear();
+        m_presentSemaphores.clear();
         if (m_surface != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(m_device.getInstance(), m_surface, nullptr);
         }

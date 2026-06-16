@@ -52,9 +52,6 @@ namespace core {
         
         m_impl->swapchain = m_device->createSwapchain(*m_impl->window, swapchainConfig);
         
-        // 4. アプリケーション層の同期オブジェクト初期化
-        // m_impl->initSyncObjects(vkDevice->getDevice());
-        
         m_lastTimestamp = glfwGetTime();
     }
 

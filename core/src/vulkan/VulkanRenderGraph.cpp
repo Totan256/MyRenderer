@@ -728,7 +728,7 @@ namespace rhi::vk {
     }
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
-        std::cout << "Executing RenderGraph..." << std::endl;
+        // std::cout << "Executing RenderGraph..." << std::endl;
         std::map<QueueType, uint64_t> queueBaseValues;
         for (QueueType type : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
             queueBaseValues[type] = m_device.getTimelineSemaphoreObject(type).getCurrentValue();
@@ -985,7 +985,7 @@ namespace rhi::vk {
             submitBatches.push_back(currentSubmitBatch);
         }
         
-        std::cout << "Batch Preparation Done. Total Batches to Submit: " << submitBatches.size() + (currentSubmitBatch.queue != VK_NULL_HANDLE ? 1 : 0) << std::endl;
+        // std::cout << "Batch Preparation Done. Total Batches to Submit: " << submitBatches.size() + (currentSubmitBatch.queue != VK_NULL_HANDLE ? 1 : 0) << std::endl;
 
         // --- バッチサブミットの実行 ---
         for (auto& sb : submitBatches) {

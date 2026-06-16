@@ -27,12 +27,6 @@ public:
         std::cout << "Successfully loaded bunny.obj" << std::endl;
         
 
-        auto outputImage = getDevice().createImage({
-            getWidth(), getHeight(), 1, 1, 1, 
-            rhi::Format::R8G8B8A8_Unorm,
-            rhi::ImageUsageFlags::ColorAttachment | rhi::ImageUsageFlags::TransferSrc | rhi::ImageUsageFlags::Storage
-        });
-
         auto depthImage = getDevice().createImage({
             getWidth(), getHeight(), 1, 1, 1, 
             rhi::Format::D32_Sfloat, // 深度フォーマット
@@ -40,15 +34,13 @@ public:
         });
 
         size_t pixelBufferSize = getWidth() * getHeight() * 4;
-        auto outputBuffer = getDevice().createBuffer({
-            pixelBufferSize, 
-            rhi::BufferUsageFlags::TransferDst | rhi::BufferUsageFlags::StorageBuffer,
-            true
-        });
+
+
 
         auto graph = getDevice().createRenderGraph();
-        auto hOutputImg = graph->importResource(outputImage.get(), "outputImage"_hash);
-        auto hOutputBuf = graph->importResource(outputBuffer.get(), "outputBuffer"_hash);
+        // スワップチェーンの画像を取得してGraphにインポートする
+        auto swapchainImage = this->getBackImage(0); // ※環境に合わせて取得メソッドを変更してください
+        auto hSwapchainImg = graph->importResource(swapchainImage, "swapchainImage"_hash);
         auto hDepthImg = graph->importResource(depthImage.get(), "depthImage"_hash);
 
         // 2. モデルのバッファ群をRenderGraphに一括インポート
@@ -59,7 +51,7 @@ public:
 
         // 3. グラフィックパスクラスの構築
         auto& pass = graph->addGraphicsPass("ModelRenderPass", "shaders/model.vert", "shaders/model.frag")
-            .addColorOutput(0, hOutputImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
+            .addColorOutput(0, hSwapchainImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
             .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
             .setGraphicsState({
                 .cullMode = rhi::CullMode::Back, // ★ 変更: 背面カリングを有効に
@@ -78,20 +70,14 @@ public:
             }
         }
 
-        graph->addCopyPass("CopyToBuffer", hOutputImg, hOutputBuf, pixelBufferSize, rhi::QueueType::Compute);
         graph->compile();
-
-        auto frameInfo = this->beginFrame();
-        graph->execute({});
-        this->endFrame(frameInfo->imageIndex);
-        this->getDevice().waitForFrame(frameInfo->frameIndex);
-
-
-        std::cout << "Saving result to model_test.png..." << std::endl;
-        outputBuffer->invalidate();
-
-        ImageExporter::savePngUint8("workspace/model_test.png", getWidth(), getHeight(), outputBuffer->map());
-        outputBuffer->unmap();
+        while (isRunning()) {
+            auto frameInfo = this->beginFrame();
+            graph->bindPhysicalResource(hSwapchainImg, this->getBackImage(frameInfo->imageIndex));
+            graph->execute({});
+            this->endFrame(frameInfo->imageIndex);
+            this->getDevice().waitForFrame(frameInfo->frameIndex);
+        }
     }
 };
 
