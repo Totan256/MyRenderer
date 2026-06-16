@@ -11,6 +11,20 @@ namespace rhi::vk{
         m_imagePools.resize(framesInFlight);
         m_bufferPools.resize(framesInFlight);
     }
+
+    void VulkanResourceAllocator::bindPhysicalResource(ResourceHandle h, rhi::Resource* res) {
+        if (!res) {
+            m_imageMap[h] = nullptr;
+            m_bufferMap[h] = nullptr;
+            return;
+        }
+
+        if (res->isImage()) {
+            m_imageMap[h] = static_cast<VulkanImage*>(res);
+        } else {
+            m_bufferMap[h] = static_cast<VulkanBuffer*>(res);
+        }
+    }
     
     void VulkanResourceAllocator::allocate(
         uint64_t currentFrameIndex,

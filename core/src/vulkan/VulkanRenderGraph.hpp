@@ -76,6 +76,8 @@ namespace rhi::vk {
         void compile() override;
         void execute(const std::vector<SemaphoreHandle>& waitSemaphores) override;
 
+        void bindPhysicalResource(ResourceHandle handle, Resource* res) override;
+
     private:
         struct SwapchainSync {
             rhi::Swapchain* swapchain;

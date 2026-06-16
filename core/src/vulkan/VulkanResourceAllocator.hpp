@@ -27,6 +27,8 @@ namespace rhi::vk {
             const std::vector<ResourceRegistration>& registry,
             const std::vector<ResourceLifetime>& lifetimes);
 
+        void bindPhysicalResource(ResourceHandle h, rhi::Resource* res);
+        
         // ハンドルから物理リソースを取得
         VulkanImage* getPhysicalImage(ResourceHandle h) { return m_imageMap[h]; }
         VulkanBuffer* getPhysicalBuffer(ResourceHandle h) { return m_bufferMap[h]; }

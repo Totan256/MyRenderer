@@ -412,6 +412,19 @@ namespace rhi::vk {
         }
     }
 
+    void VulkanRenderGraph::bindPhysicalResource(ResourceHandle handle, Resource* res) {
+        if (handle == InvalidResource || handle >= m_resourceRegistry.size()) {
+            return;
+        }
+
+        // 1. レジストリ内の物理リソースポインタを更新
+        auto& reg = m_resourceRegistry[handle];
+        reg.physicalResource = res;
+
+        // 2. アロケータが持つ物理ハンドルマップ（m_imageMap / m_bufferMap）を即座に更新
+        m_resourceAllocator.bindPhysicalResource(handle, res);
+    }
+
     void VulkanRenderGraph::compile() {
         std::cout << "Compiling RenderGraph..." << std::endl;
         clearBatchSemaphores();

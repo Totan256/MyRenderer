@@ -29,8 +29,6 @@ public:
             .addColorOutput(0, hOutput[0], rhi::LoadOp::Clear, rhi::StoreOp::Store, { 0.1f, 0.2f, 0.3f, 1.0f });
             // ※ ここに実際の描画処理 (drawなど) を追加していきます
 
-        // 4. コンパイル
-        graph->compile();
 
         for (int frame = 0; frame < 4; ++frame) {
             processEvents();
@@ -39,6 +37,8 @@ public:
             if (auto frameInfo = beginFrame()) {
                 
                 mainPass.addColorOutput(0, hOutput[frameInfo->imageIndex], rhi::LoadOp::Clear, rhi::StoreOp::Store, { 0.1f, 0.2f, 0.3f, 1.0f });
+                // 4. コンパイル
+                graph->compile();
                 graph->execute({});
 
                 // 5. フレームの終了と画面への表示

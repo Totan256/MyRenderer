@@ -329,6 +329,8 @@ namespace rhi {
         virtual void compile() = 0;
         virtual void execute(const std::vector<SemaphoreHandle>& waitSemaphores = {}) = 0;
 
+        virtual void bindPhysicalResource(ResourceHandle handle, Resource* res) = 0;
+
     protected:
         void compilePass(RenderPass* pass, Device& device) { pass->compile(device); }
         void executePass(RenderPass* pass, CommandList& cmdList) { pass->execute(cmdList); }
