@@ -27,30 +27,16 @@ namespace rhi::vk {
         }
     };
 
-    void BuildScopeAttachments(rhi::vk::RenderScope& scope, 
-        const rhi::GraphicsPass* pass, rhi::vk::VulkanResourceAllocator& allocator) {
+    void BuildScopeAttachments(rhi::vk::RenderScope& scope, const rhi::GraphicsPass* pass) {
         scope.colorAtts.clear();
         scope.depthAtt = std::nullopt;
-        scope.width = 0;
-        scope.height = 0;
+
         // カラーアタッチメントの構築
         for (const auto& [location, att] : pass->getColorAttachments()) {
-            rhi::vk::VulkanImage* img = allocator.getPhysicalImage(att.handle);
-            if (!img) continue;
-            // スコープの解像度を設定（最初のアタッチメントのサイズを採用）
-            if (scope.width == 0 || scope.height == 0) { 
-                scope.width = img->getDesc().width; 
-                scope.height = img->getDesc().height; 
-            }
             VkClearValue clearVal{};
-            clearVal.color = {{
-                att.clearValue.r, 
-                att.clearValue.g, 
-                att.clearValue.b, 
-                att.clearValue.a
-            }};
+            clearVal.color = {{ att.clearValue.r, att.clearValue.g, att.clearValue.b, att.clearValue.a }};
             scope.colorAtts.push_back({ 
-                img->getView(), 
+                att.handle, 
                 mapLoadOp(att.loadOp), 
                 mapStoreOp(att.storeOp), 
                 clearVal 
@@ -59,24 +45,14 @@ namespace rhi::vk {
         // 深度アタッチメントの構築
         if (pass->getDepthAttachment().has_value()) {
             const auto& depthAtt = pass->getDepthAttachment().value();
-            rhi::vk::VulkanImage* depthImg = allocator.getPhysicalImage(depthAtt.handle);
-            if (depthImg) {
-                if (scope.width == 0 || scope.height == 0) { 
-                    scope.width = depthImg->getDesc().width; 
-                    scope.height = depthImg->getDesc().height; 
-                }
-                VkClearValue clearVal{};
-                clearVal.depthStencil = { 
-                    depthAtt.clearValue.depth, 
-                    depthAtt.clearValue.stencil 
-                };
-                scope.depthAtt = rhi::vk::VulkanCommandList::RenderAttachment{ 
-                    depthImg->getView(), 
-                    mapLoadOp(depthAtt.loadOp), 
-                    mapStoreOp(depthAtt.storeOp), 
-                    clearVal 
-                };
-            }
+            VkClearValue clearVal{};
+            clearVal.depthStencil = { depthAtt.clearValue.depth, depthAtt.clearValue.stencil };
+            scope.depthAtt = rhi::vk::RenderScopeAttachment{ 
+                depthAtt.handle, 
+                mapLoadOp(depthAtt.loadOp), 
+                mapStoreOp(depthAtt.storeOp), 
+                clearVal 
+            };
         }
     }
 
@@ -544,7 +520,7 @@ namespace rhi::vk {
                 currentScope->isGraphics = isGraphics;
 
                 if (isGraphics) {
-                    BuildScopeAttachments(*currentScope, static_cast<GraphicsPass*>(pass.get()), m_resourceAllocator);
+                    BuildScopeAttachments(*currentScope, static_cast<GraphicsPass*>(pass.get()));
                 }
             }
             currentScope->passIndices.push_back(passIdx);
@@ -582,19 +558,15 @@ namespace rhi::vk {
                     
                     if (prevQueueFamily != currentQueueFamily) {
                         if (isImg) {
-                            VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(h);
-                            VkImage img = physImg->getImage();
-                            
-                            VkImageMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                            VirtualImageBarrier releaseBarrier{};
                             releaseBarrier.srcStageMask = prevTrack.state.stageMask; releaseBarrier.srcAccessMask = prevTrack.state.accessMask;
                             releaseBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; releaseBarrier.dstAccessMask = VK_ACCESS_2_NONE;
                             releaseBarrier.oldLayout = prevTrack.state.layout; releaseBarrier.newLayout = prevTrack.state.layout;
                             releaseBarrier.srcQueueFamilyIndex = prevQueueFamily; releaseBarrier.dstQueueFamilyIndex = currentQueueFamily;
-                            releaseBarrier.image = img;
-                            releaseBarrier.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                            releaseBarrier.handle = h;
                             m_batches[prevBatchIdx].imageBarriers.push_back(releaseBarrier);
                             
-                            VkImageMemoryBarrier2 acquireBarrier = releaseBarrier;
+                            VirtualImageBarrier acquireBarrier = releaseBarrier;
                             acquireBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE; acquireBarrier.srcAccessMask = VK_ACCESS_2_NONE;
                             acquireBarrier.dstStageMask = next.stageMask; acquireBarrier.dstAccessMask = next.accessMask;
                             acquireBarrier.oldLayout = prevTrack.state.layout; 
@@ -602,15 +574,14 @@ namespace rhi::vk {
                             m_batches[currentBatchIdx].imageBarriers.push_back(acquireBarrier);
                             
                         } else {
-                            VkBuffer buf = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
-                            VkBufferMemoryBarrier2 releaseBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                            VirtualBufferBarrier releaseBarrier{};
                             releaseBarrier.srcStageMask = prevTrack.state.stageMask; releaseBarrier.srcAccessMask = prevTrack.state.accessMask;
                             releaseBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; releaseBarrier.dstAccessMask = VK_ACCESS_2_NONE;
                             releaseBarrier.srcQueueFamilyIndex = prevQueueFamily; releaseBarrier.dstQueueFamilyIndex = currentQueueFamily;
-                            releaseBarrier.buffer = buf; releaseBarrier.offset = 0; releaseBarrier.size = VK_WHOLE_SIZE;
+                            releaseBarrier.handle = h;
                             m_batches[prevBatchIdx].bufferBarriers.push_back(releaseBarrier);
 
-                            VkBufferMemoryBarrier2 acquireBarrier = releaseBarrier;
+                            VirtualBufferBarrier acquireBarrier = releaseBarrier;
                             acquireBarrier.srcStageMask = VK_PIPELINE_STAGE_2_NONE; acquireBarrier.srcAccessMask = VK_ACCESS_2_NONE;
                             acquireBarrier.dstStageMask = next.stageMask; acquireBarrier.dstAccessMask = next.accessMask;
                             m_batches[currentBatchIdx].bufferBarriers.push_back(acquireBarrier);
@@ -619,23 +590,21 @@ namespace rhi::vk {
                         if (prevTrack.state.layout != next.layout || (next.accessMask & VK_ACCESS_2_SHADER_WRITE_BIT)) {
                             if (isImg) {
                                 auto physImg = m_resourceAllocator.getPhysicalImage(h);
-                                VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                                VirtualImageBarrier imgBarrier{};
                                 imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 imgBarrier.srcStageMask = prevTrack.state.stageMask; imgBarrier.srcAccessMask = prevTrack.state.accessMask;
                                 imgBarrier.dstStageMask = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                                 imgBarrier.oldLayout = prevTrack.state.layout; imgBarrier.newLayout = next.layout;
-                                imgBarrier.image = physImg->getImage();
-                                imgBarrier.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                                imgBarrier.handle = h;
                                 m_batches[currentBatchIdx].imageBarriers.push_back(imgBarrier);
                             } else {
-                                VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                                VirtualBufferBarrier bufBarrier{};
                                 bufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 bufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                                 bufBarrier.srcStageMask = prevTrack.state.stageMask; bufBarrier.srcAccessMask = prevTrack.state.accessMask;
                                 bufBarrier.dstStageMask = next.stageMask; bufBarrier.dstAccessMask = next.accessMask;
-                                bufBarrier.buffer = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
-                                bufBarrier.offset = 0; bufBarrier.size = VK_WHOLE_SIZE;
+                                bufBarrier.handle = h;
                                 m_batches[currentBatchIdx].bufferBarriers.push_back(bufBarrier);
                             }
                         }
@@ -650,26 +619,21 @@ namespace rhi::vk {
                     }
 
                     if (isImg) {
-                        VkImageMemoryBarrier2 imgBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                        VirtualImageBarrier imgBarrier{};
                         imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         imgBarrier.srcStageMask = prev.stageMask; imgBarrier.srcAccessMask = prev.accessMask;
                         imgBarrier.dstStageMask = next.stageMask; imgBarrier.dstAccessMask = next.accessMask;
                         imgBarrier.oldLayout = prev.layout; imgBarrier.newLayout = next.layout;
-                        imgBarrier.image = m_resourceAllocator.getPhysicalImage(h)->getImage();
-                        imgBarrier.subresourceRange = { 
-                            getAspectMask(m_resourceAllocator.getPhysicalImage(h)->getDesc().format), 
-                            0, VK_REMAINING_MIP_LEVELS, 0, 1 
-                        };
+                        imgBarrier.handle = h;
                         m_batches[currentBatchIdx].imageBarriers.push_back(imgBarrier);
                     } else {
-                        VkBufferMemoryBarrier2 bufBarrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                        VirtualBufferBarrier bufBarrier{};
                         bufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         bufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                         bufBarrier.srcStageMask = prev.stageMask; bufBarrier.srcAccessMask = prev.accessMask;
                         bufBarrier.dstStageMask = next.stageMask; bufBarrier.dstAccessMask = next.accessMask;
-                        bufBarrier.buffer = m_resourceAllocator.getPhysicalBuffer(h)->getNativeBuffer();
-                        bufBarrier.offset = 0; bufBarrier.size = VK_WHOLE_SIZE;
+                        bufBarrier.handle = h;
                         m_batches[currentBatchIdx].bufferBarriers.push_back(bufBarrier);
                     }
                 }
@@ -745,7 +709,8 @@ namespace rhi::vk {
                     uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];
                     std::cout << "Swapchain Image Detected: Resource " << h << ", First Batch " << firstBatchIdx << ", Last Batch " << lastBatchIdx << std::endl;
                     m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
-                    VkImageMemoryBarrier2 presentBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                    VirtualImageBarrier presentBarrier;
+                    presentBarrier.handle = h;
                     presentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                     presentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                     presentBarrier.srcStageMask = track.state.stageMask;
@@ -754,8 +719,6 @@ namespace rhi::vk {
                     presentBarrier.dstAccessMask = VK_ACCESS_2_NONE;
                     presentBarrier.oldLayout = track.state.layout;
                     presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-                    presentBarrier.image = physImg->getImage();
-                    presentBarrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
                     
                     m_batches[lastBatchIdx].postImageBarriers.push_back(presentBarrier);
                 }
@@ -817,43 +780,109 @@ namespace rhi::vk {
             cmdList->begin();
             auto vkCmdBuf = cmdList->getCommandBuffer();
 
-            if (!batch.imageBarriers.empty() || !batch.bufferBarriers.empty()) {
+            std::vector<VkImageMemoryBarrier2> actualImageBarriers;
+            std::vector<VkBufferMemoryBarrier2> actualBufferBarriers;
+
+            for (const auto& vb : batch.imageBarriers) {
+                VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(vb.handle);
+                if (!physImg) continue; // リソースがバインドされていない場合はスキップ
+                VkImageMemoryBarrier2 b{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                b.srcStageMask = vb.srcStageMask; b.srcAccessMask = vb.srcAccessMask;
+                b.dstStageMask = vb.dstStageMask; b.dstAccessMask = vb.dstAccessMask;
+                b.oldLayout = vb.oldLayout; b.newLayout = vb.newLayout;
+                b.srcQueueFamilyIndex = vb.srcQueueFamilyIndex; b.dstQueueFamilyIndex = vb.dstQueueFamilyIndex;
+                b.image = physImg->getImage();
+                b.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                actualImageBarriers.push_back(b);
+            }
+
+            for (const auto& vb : batch.bufferBarriers) {
+                VulkanBuffer* physBuf = m_resourceAllocator.getPhysicalBuffer(vb.handle);
+                if (!physBuf) continue;
+                VkBufferMemoryBarrier2 b{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 };
+                b.srcStageMask = vb.srcStageMask; b.srcAccessMask = vb.srcAccessMask;
+                b.dstStageMask = vb.dstStageMask; b.dstAccessMask = vb.dstAccessMask;
+                b.srcQueueFamilyIndex = vb.srcQueueFamilyIndex; b.dstQueueFamilyIndex = vb.dstQueueFamilyIndex;
+                b.buffer = physBuf->getNativeBuffer();
+                b.offset = 0; b.size = VK_WHOLE_SIZE;
+                actualBufferBarriers.push_back(b);
+            }
+
+            if (!actualImageBarriers.empty() || !actualBufferBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-                depInfo.imageMemoryBarrierCount = (uint32_t)batch.imageBarriers.size();
-                depInfo.pImageMemoryBarriers    = batch.imageBarriers.data();
-                depInfo.bufferMemoryBarrierCount = (uint32_t)batch.bufferBarriers.size();
-                depInfo.pBufferMemoryBarriers    = batch.bufferBarriers.data();
+                depInfo.imageMemoryBarrierCount = (uint32_t)actualImageBarriers.size();
+                depInfo.pImageMemoryBarriers    = actualImageBarriers.data();
+                depInfo.bufferMemoryBarrierCount = (uint32_t)actualBufferBarriers.size();
+                depInfo.pBufferMemoryBarriers    = actualBufferBarriers.data();
                 vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
             }
 
             for (auto& scope : batch.scopes) {
                 if (scope.isGraphics) {
-                    const auto* pDepthAtt = scope.depthAtt.has_value() ? &scope.depthAtt.value() : nullptr;
-                    // スコープの開始（レンダーターゲットのバインド）
-                    cmdList->beginRendering(scope.colorAtts, pDepthAtt, scope.width, scope.height);
-                    // スコープ内のパスを実行（パイプラインバインドとドローコールのみ）
+                    // --- アタッチメントと解像度の遅延評価 ---
+                    std::vector<VulkanCommandList::RenderAttachment> vkColorAtts;
+                    std::optional<VulkanCommandList::RenderAttachment> vkDepthAtt = std::nullopt;
+                    uint32_t renderWidth = 0;
+                    uint32_t renderHeight = 0;
+
+                    for (const auto& logicalAtt : scope.colorAtts) {
+                        VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(logicalAtt.handle);
+                        vkColorAtts.push_back({
+                            physImg->getView(),
+                            logicalAtt.loadOp, logicalAtt.storeOp, logicalAtt.clearValue
+                        });
+                        // 最初の有効なアタッチメントから解像度を取得
+                        if (renderWidth == 0) { renderWidth = physImg->getDesc().width; renderHeight = physImg->getDesc().height; }
+                    }
+
+                    if (scope.depthAtt.has_value()) {
+                        VulkanImage* physDepth = m_resourceAllocator.getPhysicalImage(scope.depthAtt->handle);
+                        vkDepthAtt = VulkanCommandList::RenderAttachment{
+                            physDepth->getView(),
+                            scope.depthAtt->loadOp, scope.depthAtt->storeOp, scope.depthAtt->clearValue
+                        };
+                        if (renderWidth == 0) { renderWidth = physDepth->getDesc().width; renderHeight = physDepth->getDesc().height; }
+                    }
+
+                    const auto* pDepthAtt = vkDepthAtt.has_value() ? &vkDepthAtt.value() : nullptr;
+                    cmdList->beginRendering(vkColorAtts, pDepthAtt, renderWidth, renderHeight);
+
+                    // パスの実行
                     for (uint32_t passIdx : scope.passIndices) {
                         executePass(m_passes[passIdx].get(), *cmdList);
                     }
-                    // スコープの終了
                     cmdList->endRendering();
                 } else {
-                    // Compute, Copy等のパス
                     for (uint32_t passIdx : scope.passIndices) {
                         executePass(m_passes[passIdx].get(), *cmdList);
                     }
                 }
             }
 
-            // パス実行後のバリア (Presentへの遷移など) を発行
-            if (!batch.postImageBarriers.empty()) {
+
+            std::vector<VkImageMemoryBarrier2> actualPostImageBarriers;
+            for (const auto& vb : batch.postImageBarriers) {
+                VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(vb.handle);
+                if (!physImg) continue;
+                VkImageMemoryBarrier2 b{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+                b.srcStageMask = vb.srcStageMask; b.srcAccessMask = vb.srcAccessMask;
+                b.dstStageMask = vb.dstStageMask; b.dstAccessMask = vb.dstAccessMask;
+                b.oldLayout = vb.oldLayout; b.newLayout = vb.newLayout;
+                b.srcQueueFamilyIndex = vb.srcQueueFamilyIndex; b.dstQueueFamilyIndex = vb.dstQueueFamilyIndex;
+                b.image = physImg->getImage();
+                b.subresourceRange = { getAspectMask(physImg->getDesc().format), 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
+                actualPostImageBarriers.push_back(b);
+            }
+
+            if (!actualPostImageBarriers.empty()) {
                 VkDependencyInfo depInfo{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-                depInfo.imageMemoryBarrierCount = (uint32_t)batch.postImageBarriers.size();
-                depInfo.pImageMemoryBarriers    = batch.postImageBarriers.data();
+                depInfo.imageMemoryBarrierCount = (uint32_t)actualPostImageBarriers.size();
+                depInfo.pImageMemoryBarriers    = actualPostImageBarriers.data();
                 vkCmdPipelineBarrier2(vkCmdBuf, &depInfo);
             }
 
             cmdList->end();
+
 
             // キューの切り替え判定
             VkQueue queue = m_device.getQueue(batch.queueType);

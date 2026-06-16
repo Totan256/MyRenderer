@@ -19,15 +19,42 @@ namespace rhi::vk {
         std::map<QueueType, CommandPoolData> pools;
     };
 
+    struct RenderScopeAttachment {
+        ResourceHandle handle;
+        VkAttachmentLoadOp loadOp;
+        VkAttachmentStoreOp storeOp;
+        VkClearValue clearValue;
+    };
+
+    struct VirtualImageBarrier {
+        ResourceHandle handle;
+        VkPipelineStageFlags2 srcStageMask;
+        VkAccessFlags2 srcAccessMask;
+        VkPipelineStageFlags2 dstStageMask;
+        VkAccessFlags2 dstAccessMask;
+        VkImageLayout oldLayout;
+        VkImageLayout newLayout;
+        uint32_t srcQueueFamilyIndex;
+        uint32_t dstQueueFamilyIndex;
+    };
+
+    struct VirtualBufferBarrier {
+        ResourceHandle handle;
+        VkPipelineStageFlags2 srcStageMask;
+        VkAccessFlags2 srcAccessMask;
+        VkPipelineStageFlags2 dstStageMask;
+        VkAccessFlags2 dstAccessMask;
+        uint32_t srcQueueFamilyIndex;
+        uint32_t dstQueueFamilyIndex;
+    };
+
     struct RenderScope {
         bool isGraphics = false;
         std::vector<uint32_t> passIndices;
 
         // Graphicsの場合、スコープの開始時に渡すアタッチメント情報
-        std::vector<VulkanCommandList::RenderAttachment> colorAtts;
-        std::optional<VulkanCommandList::RenderAttachment> depthAtt;
-        uint32_t width = 0;
-        uint32_t height = 0;
+        std::vector<RenderScopeAttachment> colorAtts;
+        std::optional<RenderScopeAttachment> depthAtt;
     };
     
     struct RenderBatch {
@@ -43,10 +70,9 @@ namespace rhi::vk {
         std::vector<SyncPoint> runtimeWaitSyncPoints;
         SyncPoint runtimeSignalSyncPoint;
 
-        std::vector<RenderScope> scopes;
-        std::vector<VkImageMemoryBarrier2> imageBarriers;
-        std::vector<VkBufferMemoryBarrier2> bufferBarriers;
-        std::vector<VkImageMemoryBarrier2> postImageBarriers;
+        std::vector<RenderScope> scopes;std::vector<VirtualImageBarrier> imageBarriers;
+        std::vector<VirtualBufferBarrier> bufferBarriers;
+        std::vector<VirtualImageBarrier> postImageBarriers;
     };
 
     struct SwapchainSync {
