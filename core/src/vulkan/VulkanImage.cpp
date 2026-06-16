@@ -53,7 +53,8 @@ namespace rhi::vk{
     VulkanImage::VulkanImage(VulkanDevice& device, VkImage existingImage, VkFormat format, VkExtent3D extent, rhi::Swapchain* swapchain)
         : m_device(device), m_image(existingImage), m_isOwned(false) // 所有権は持たない
     {
-       m_desc.width = extent.width;
+        m_swapchain = swapchain;
+        m_desc.width = extent.width;
         m_desc.height = extent.height;
         m_desc.depth = extent.depth;
         
