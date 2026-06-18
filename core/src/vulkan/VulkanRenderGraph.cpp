@@ -754,19 +754,9 @@ namespace rhi::vk {
         auto asyncSems = m_device.getUploadManager()->consumeAsyncSyncPoints();
         std::vector<SyncPoint> combinedAsyncWaits = asyncSems;
 
-        // --- バッチサブミット用の構造体 (vkQueueSubmit2 準拠) ---
-        struct SubmitBatch {
-            VkQueue queue = VK_NULL_HANDLE;
-            std::vector<VkSubmitInfo2> submits;
-            VkFence fence = VK_NULL_HANDLE;
-            
-            // VkSubmitInfo2が指すポインタの寿命をこの構造体内で管理する
-            std::vector<std::vector<VkSemaphoreSubmitInfo>> waitSemaphoresList;
-            std::vector<std::vector<VkSemaphoreSubmitInfo>> signalSemaphoresList;
-            std::vector<VkCommandBufferSubmitInfo> cmdBufferInfosList;
-        };
+        
 
-        std::vector<SubmitBatch> submitBatches;
+        m_submitBatches.clear();
         SubmitBatch currentSubmitBatch;
 
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
@@ -887,7 +877,7 @@ namespace rhi::vk {
             // キューの切り替え判定
             VkQueue queue = m_device.getQueue(batch.queueType);
             if (currentSubmitBatch.queue != queue && currentSubmitBatch.queue != VK_NULL_HANDLE) {
-                submitBatches.push_back(currentSubmitBatch);
+                m_submitBatches.push_back(currentSubmitBatch);
                 currentSubmitBatch = SubmitBatch{};
             }
             currentSubmitBatch.queue = queue;
@@ -982,13 +972,12 @@ namespace rhi::vk {
         }
 
         if (currentSubmitBatch.queue != VK_NULL_HANDLE) {
-            submitBatches.push_back(currentSubmitBatch);
+            m_submitBatches.push_back(currentSubmitBatch);
         }
         
-        // std::cout << "Batch Preparation Done. Total Batches to Submit: " << submitBatches.size() + (currentSubmitBatch.queue != VK_NULL_HANDLE ? 1 : 0) << std::endl;
 
         // --- バッチサブミットの実行 ---
-        for (auto& sb : submitBatches) {
+        for (auto& sb : m_submitBatches) {
             // vectorが再アロケートされないこのタイミングで、安全にポインタを設定する
             for(size_t i = 0; i < sb.submits.size(); ++i) {
                 sb.submits[i].waitSemaphoreInfoCount = (uint32_t)sb.waitSemaphoresList[i].size();

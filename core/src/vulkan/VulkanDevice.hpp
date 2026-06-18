@@ -64,6 +64,7 @@ namespace rhi::vk{
         SyncPoint advanceTimeline(QueueType type) override;
         uint64_t getCompletedTimelineValue(QueueType type) override;
         void waitTimeline(const std::vector<SyncPoint>& syncPoints, uint64_t timeoutNs = UINT64_MAX) override;
+        void waitForIdle() override;
 
         // 生のハンドル取得（拡張性のため）
         VkDevice getDevice() const { return m_device; }

@@ -37,6 +37,9 @@ namespace core {
                 m_impl->width = resizeEvent.width;
                 m_impl->height = resizeEvent.height;
                 m_impl->resizeRequested = true;
+                if (m_device) {
+                    m_device->waitForIdle();
+                }
                 this->onResize(resizeEvent.width, resizeEvent.height);
             }
         });
@@ -120,7 +123,7 @@ namespace core {
 
     rhi::Image* Application::getBackImage(uint32_t imageIndex) {
         // RenderGraphへインポートするために、指定されたインデックスのRawポインタを返す
-        return m_impl->swapchain->getCurrentImage(imageIndex).get();
+        return m_impl->swapchain->getCurrentImage(imageIndex);
     }
 
 } // namespace core

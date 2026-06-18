@@ -138,12 +138,12 @@ namespace rhi::vk {
         for (size_t i = 0; i < m_vkImages.size(); i++) {
             // ※ VulkanImageクラスに、既存のVkImageをラップするコンストラクタが
             // 必要になる場合があります (所有権を持たず、破棄時に vkDestroyImage を呼ばない設定)
-            auto img = std::make_shared<VulkanImage>(
+            auto img = std::make_unique<VulkanImage>(
                 m_device, m_vkImages[i], m_format, 
                 VkExtent3D{m_extent.width, m_extent.height, 1},
                 this
             );
-            m_images.push_back(img);
+            m_images.push_back(std::move(img));
         }
 
         // 初回作成時のみセマフォを確保

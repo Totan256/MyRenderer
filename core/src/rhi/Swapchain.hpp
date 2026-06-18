@@ -19,7 +19,7 @@ public:
     virtual ~Swapchain() = default;
 
     virtual void recreate(uint32_t width, uint32_t height) = 0;
-    virtual std::shared_ptr<rhi::Image> getCurrentImage(uint32_t index) const = 0;
+    virtual rhi::Image* getCurrentImage(uint32_t index) const = 0;
     virtual uint32_t getImageCount() const = 0;
     virtual uint32_t getWidth() const = 0;
     virtual uint32_t getHeight() const = 0;

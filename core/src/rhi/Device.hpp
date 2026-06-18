@@ -22,6 +22,7 @@ namespace rhi {
         virtual void beginFrame() = 0;
         virtual void endFrame() = 0;
         virtual void waitForFrame(uint64_t frameIndex) = 0;
+        virtual void waitForIdle() = 0;
         virtual uint64_t getCurrentFrame() const = 0;
 
         // timeline semaphore 関連の抽象メソッド

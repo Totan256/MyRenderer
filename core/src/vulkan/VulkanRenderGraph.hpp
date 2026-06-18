@@ -115,8 +115,21 @@ namespace rhi::vk {
         std::vector<uint32_t> m_sortedIndices;
         std::map<Resource*, ResourceHandle> m_physicalToHandle;
 
+        // --- バッチサブミット用の構造体 (vkQueueSubmit2 準拠) ---
+        struct SubmitBatch {
+            VkQueue queue = VK_NULL_HANDLE;
+            std::vector<VkSubmitInfo2> submits;
+            VkFence fence = VK_NULL_HANDLE;
+            
+            // VkSubmitInfo2が指すポインタの寿命をこの構造体内で管理する
+            std::vector<std::vector<VkSemaphoreSubmitInfo>> waitSemaphoresList;
+            std::vector<std::vector<VkSemaphoreSubmitInfo>> signalSemaphoresList;
+            std::vector<VkCommandBufferSubmitInfo> cmdBufferInfosList;
+        };
         std::vector<RenderBatch> m_batches;
         std::vector<VkSemaphore> m_batchSemaphores;
+        std::vector<SubmitBatch> m_submitBatches; 
+        std::vector<VkCommandBufferSubmitInfo> m_cbInfos;
         std::vector<SwapchainSync> m_swapchainSyncs;
 
         std::array<PerFrameData, MAX_FRAMES_IN_FLIGHT> m_frameData;

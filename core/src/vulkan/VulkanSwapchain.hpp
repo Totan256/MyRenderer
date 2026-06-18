@@ -35,7 +35,7 @@ namespace rhi::vk {
         bool present(uint32_t imageIndex) override;
 
         // ゲッター群
-        std::shared_ptr<rhi::Image> getCurrentImage(uint32_t index) const { return m_images[index]; }
+        rhi::Image* getCurrentImage(uint32_t index) const { return m_images[index].get(); }
         // rhi::Format getFormat() const { return static_cast<rhi::Format>(m_format); }
         VkExtent2D getExtent() const { return m_extent; }
         uint32_t getImageCount() const { return static_cast<uint32_t>(m_images.size()); }
@@ -75,7 +75,7 @@ namespace rhi::vk {
         VkQueue m_presentQueue; // Present用のキュー（通常はGraphicsと同じ）
 
         std::vector<VkImage> m_vkImages;
-        std::vector<std::shared_ptr<rhi::Image>> m_images; // RenderGraph等で扱うためのラッパー
+        std::vector<std::unique_ptr<rhi::Image>> m_images; // RenderGraph等で扱うためのラッパー
     };
 
 } // namespace rhi

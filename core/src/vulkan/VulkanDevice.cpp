@@ -821,4 +821,10 @@ namespace rhi::vk{
         
         vkWaitSemaphores(m_device, &waitInfo, timeoutNs);
     }
+
+    void VulkanDevice::waitForIdle(){
+        if (m_device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_device);
+        }
+    }
 }
