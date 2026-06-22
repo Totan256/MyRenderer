@@ -18,9 +18,15 @@ namespace rhi::vk {
         return VK_IMAGE_ASPECT_COLOR_BIT;
     };
 
+    // キューごとのデフォルト待機マスク
     auto getWaitStageForQueue = [](QueueType type) -> VkPipelineStageFlags {
         switch (type) {
-            case QueueType::Graphics: return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            case QueueType::Graphics:
+                return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | 
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                       VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | 
+                       VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
             case QueueType::Compute:  return VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
             case QueueType::Transfer: return VK_PIPELINE_STAGE_TRANSFER_BIT;
             default: return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -643,19 +649,21 @@ namespace rhi::vk {
         std::cout << "Barrier Insertion Done." << std::endl;
         // --- 5. SyncPoint Tracking ---
         struct ResourceSyncState {
-            RenderBatch::RelativeSync writeSync = {QueueType::Compute, 0};
+            RenderBatch::RelativeSync writeSync = {QueueType::Compute, 0, VK_PIPELINE_STAGE_2_NONE};
             std::vector<RenderBatch::RelativeSync> readSyncs;
         };
         std::map<rhi::ResourceHandle, ResourceSyncState> currentSyncStates;
 
-        auto addRelativeWait = [](std::vector<RenderBatch::RelativeSync>& waits, RenderBatch::RelativeSync sp) {
+        auto addRelativeWait = [](std::vector<RenderBatch::RelativeSync>& waits, RenderBatch::RelativeSync sp, VkPipelineStageFlags2 consumerStage) {
             if (sp.offset == 0) return;
             for (auto& w : waits) {
                 if (w.queueType == sp.queueType) {
                     w.offset = std::max(w.offset, sp.offset);
+                    w.waitStageMask |= consumerStage; // 要求ステージをORで合成
                     return;
                 }
             }
+            sp.waitStageMask = consumerStage; // 新規追加時
             waits.push_back(sp);
         };
 
@@ -668,20 +676,23 @@ namespace rhi::vk {
                 const auto& req = pass->getRequirements()[i];
                 auto& syncState = currentSyncStates[h];
 
+                // 消費者（このバッチ）が要求するパイプラインステージを取得
+                VkPipelineStageFlags2 consumerStage = MapResourceState(req.state, req.stage).stageMask;
+
                 if (isWriteUsage(req.state)) {
                     if (syncState.writeSync.offset > 0 && syncState.writeSync.queueType != batch.queueType) {
-                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync);
+                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync, consumerStage);
                     }
                     for (const auto& rs : syncState.readSyncs) {
                         if (rs.offset > 0 && rs.queueType != batch.queueType) {
-                            addRelativeWait(batch.relativeWaitPoints, rs);
+                            addRelativeWait(batch.relativeWaitPoints, rs, consumerStage);
                         }
                     }
-                    syncState.writeSync = {batch.queueType, batch.relativeSignalOffset};
+                    syncState.writeSync = {batch.queueType, batch.relativeSignalOffset, VK_PIPELINE_STAGE_2_NONE};
                     syncState.readSyncs.clear();
                 } else {
                     if (syncState.writeSync.offset > 0 && syncState.writeSync.queueType != batch.queueType) {
-                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync);
+                        addRelativeWait(batch.relativeWaitPoints, syncState.writeSync, consumerStage);
                     }
                     bool found = false;
                     for (auto& rs : syncState.readSyncs) {
@@ -690,7 +701,7 @@ namespace rhi::vk {
                             found = true; break;
                         }
                     }
-                    if (!found) syncState.readSyncs.push_back({batch.queueType, batch.relativeSignalOffset});
+                    if (!found) syncState.readSyncs.push_back({batch.queueType, batch.relativeSignalOffset, VK_PIPELINE_STAGE_2_NONE});
                 }
             }
         }
@@ -739,7 +750,8 @@ namespace rhi::vk {
             for (const auto& relWait : batch.relativeWaitPoints) {
                 batch.runtimeWaitSyncPoints.push_back({
                     relWait.queueType, 
-                    queueBaseValues[relWait.queueType] + relWait.offset
+                    queueBaseValues[relWait.queueType] + relWait.offset,
+                    relWait.waitStageMask // コンパイル時に計算したマスクを引き継ぐ
                 });
             }
         }
@@ -891,7 +903,8 @@ namespace rhi::vk {
                     VkSemaphoreSubmitInfo waitInfo{VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
                     waitInfo.semaphore = sem;
                     waitInfo.value = sp.value;
-                    waitInfo.stageMask = getWaitStageForQueue(batch.queueType);
+                    // 固定関数ではなく、バッチの依存から導出された動的マスクを使用
+                    waitInfo.stageMask = sp.waitStageMask != 0 ? sp.waitStageMask : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
                     currentWaitInfos.push_back(waitInfo);
                 }
             }

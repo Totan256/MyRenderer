@@ -62,15 +62,23 @@ namespace rhi::vk {
         struct RelativeSync {
             QueueType queueType;
             uint32_t offset;
+            VkPipelineStageFlags2 waitStageMask = VK_PIPELINE_STAGE_2_NONE;
         };
         // compile時に決まる相対的な依存関係
         std::vector<RelativeSync> relativeWaitPoints;
         uint32_t relativeSignalOffset = 0;
         // execute時に計算される絶対的な同期ポイント
-        std::vector<SyncPoint> runtimeWaitSyncPoints;
+        struct RuntimeWait {
+            QueueType queueType;
+            uint64_t value;
+            VkPipelineStageFlags2 waitStageMask = VK_PIPELINE_STAGE_2_NONE;
+        };
+        // execute時に計算される絶対的な同期ポイント
+        std::vector<RuntimeWait> runtimeWaitSyncPoints;
         SyncPoint runtimeSignalSyncPoint;
 
-        std::vector<RenderScope> scopes;std::vector<VirtualImageBarrier> imageBarriers;
+        std::vector<RenderScope> scopes;
+        std::vector<VirtualImageBarrier> imageBarriers;
         std::vector<VirtualBufferBarrier> bufferBarriers;
         std::vector<VirtualImageBarrier> postImageBarriers;
     };
