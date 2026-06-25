@@ -50,8 +50,9 @@ namespace core {
         // --- MUST (必須要件) ---
         bool shouldClose() const;
         void pollEvents();
-        uint32_t getWidth() const { return m_width; }
-        uint32_t getHeight() const { return m_height; }
+        void waitForEvents();
+        uint32_t getWidth() const { return m_data.width; }
+        uint32_t getHeight() const { return m_data.height; }
         
         // RHI層へ渡すVulkan連携機能
         const VulkanProvider& getVulkanProvider() const { return m_vulkanProvider; }
@@ -78,8 +79,6 @@ namespace core {
 
     private:
         GLFWwindow* m_window = nullptr;
-        uint32_t m_width;
-        uint32_t m_height;
         VulkanProvider m_vulkanProvider;
 
         // GLFWコールバックへ渡すための内部データ構造体

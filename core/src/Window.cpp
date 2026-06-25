@@ -16,8 +16,9 @@ namespace core {
     }
 
     Window::Window(const std::string& title, uint32_t width, uint32_t height, bool borderless)
-        : m_width(width), m_height(height) 
     {
+        m_data.width = width;
+        m_data.height = height;
         init(title, borderless);
     }
 
@@ -27,8 +28,6 @@ namespace core {
 
     void Window::init(const std::string& title, bool borderless) {
         m_data.title = title;
-        m_data.width = m_width;
-        m_data.height = m_height;
 
         // 初回のウィンドウ作成時のみGLFWを初期化
         if (s_GLFWWindowCount == 0) {
@@ -47,7 +46,7 @@ namespace core {
             glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
         }
 
-        m_window = glfwCreateWindow((int)m_width, (int)m_height, m_data.title.c_str(), nullptr, nullptr);
+        m_window = glfwCreateWindow((int)m_data.width, (int)m_data.height, m_data.title.c_str(), nullptr, nullptr);
         if (!m_window) {
             throw std::runtime_error("Failed to create GLFW window!");
         }
@@ -117,6 +116,9 @@ namespace core {
 
     void Window::pollEvents() {
         glfwPollEvents();
+    }
+    void Window::waitForEvents(){
+        glfwWaitEvents();
     }
 
     // std::vector<const char*> Window::getRequiredVulkanExtensions() {

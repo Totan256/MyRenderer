@@ -38,6 +38,7 @@ public:
 
     bool isRunning() const;
     void processEvents();
+    void waitWindowEvents();
     void requestRedraw();
     
     // --- 変更後のフレーム管理 ---

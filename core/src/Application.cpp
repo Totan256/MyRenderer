@@ -59,6 +59,7 @@ namespace core {
     }
 
     Application::~Application() {
+        m_device->waitForIdle();
         m_impl->swapchain.reset();
         m_device.reset();
         m_impl->window.reset();
@@ -77,6 +78,8 @@ namespace core {
         m_deltaTime = static_cast<float>(currentTimestamp - m_lastTimestamp);
         m_lastTimestamp = currentTimestamp;
     }
+
+    void Application::waitWindowEvents() { m_impl->window->waitForEvents(); }
 
     uint32_t Application::getWidth() const {
         return m_impl->window->getWidth();

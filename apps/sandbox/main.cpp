@@ -33,9 +33,6 @@ public:
             rhi::ImageUsageFlags::DepthStencilAttachment | rhi::ImageUsageFlags::Storage
         });
 
-        size_t pixelBufferSize = getWidth() * getHeight() * 4;
-
-
 
         auto graph = getDevice().createRenderGraph();
         // スワップチェーンの画像を取得してGraphにインポートする
@@ -54,9 +51,9 @@ public:
             .addColorOutput(0, hSwapchainImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
             .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
             .setGraphicsState({
-                .cullMode = rhi::CullMode::Back, // ★ 変更: 背面カリングを有効に
-                .depthTestEnable = true,         // ★ 変更: 深度テストを有効に
-                .depthWriteEnable = true         // ★ 変更: 深度書き込みを有効に
+                .cullMode = rhi::CullMode::Back, // 背面カリングを有効
+                .depthTestEnable = true,         // 深度テストを有効
+                .depthWriteEnable = true         // 深度書き込みを有効
             });
 
         if (bunnyModel) {
@@ -73,11 +70,13 @@ public:
         graph->compile();
         while (isRunning()) {
             auto frameInfo = this->beginFrame();
+            if(!frameInfo) continue;
+
             graph->bindPhysicalResource(hSwapchainImg, this->getBackImage(frameInfo->imageIndex));
             graph->execute({});
             this->endFrame(frameInfo->imageIndex);
-            this->getDevice().waitForFrame(frameInfo->frameIndex);
         }
+        this->getDevice().waitForIdle();
     }
 };
 
