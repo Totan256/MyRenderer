@@ -30,12 +30,12 @@ namespace rhi::vk {
         void recreate(uint32_t width, uint32_t height);
 
         // 次の描画用画像を取得する。再構築が必要な場合(リサイズ時等)は false を返す
-        bool acquireNextImage(uint32_t& imageIndex) override;
+        bool acquireNextImage() override;
         // 描画結果を画面に表示する。再構築が必要な場合は false を返す
-        bool present(uint32_t imageIndex) override;
+        bool present() override;
 
         // ゲッター群
-        rhi::Image* getCurrentImage(uint32_t index) const { return m_images[index].get(); }
+        rhi::Image* getCurrentImage() const { return m_images[m_currentImageIndex].get(); }
         // rhi::Format getFormat() const { return static_cast<rhi::Format>(m_format); }
         VkExtent2D getExtent() const { return m_extent; }
         uint32_t getImageCount() const { return static_cast<uint32_t>(m_images.size()); }
@@ -76,6 +76,7 @@ namespace rhi::vk {
 
         std::vector<VkImage> m_vkImages;
         std::vector<std::unique_ptr<rhi::Image>> m_images; // RenderGraph等で扱うためのラッパー
+        uint32_t m_currentImageIndex = 0;
     };
 
 } // namespace rhi

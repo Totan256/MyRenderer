@@ -153,7 +153,10 @@ namespace rhi::vk {
             std::vector<VkFormat> vkColorFormats;
             for (const auto& [location, att] : m_colorAttachments) {
                 const auto& reg = graph.getRegistration(att.handle);
-                if (reg.isImported && reg.physicalResource && reg.physicalResource->isImage()) {
+                if (reg.swapchain) {
+                    // スワップチェーンから現在の画像のフォーマットを取得する
+                    vkColorFormats.push_back(mapFormat(reg.swapchain->getCurrentImage()->getDesc().format));
+                } else if (reg.isImported && reg.physicalResource && reg.physicalResource->isImage()) {
                     vkColorFormats.push_back(mapFormat(static_cast<VulkanImage*>(reg.physicalResource)->getDesc().format));
                 } else if (std::holds_alternative<rhi::ImageDesc>(reg.desc)) {
                     vkColorFormats.push_back(mapFormat(std::get<rhi::ImageDesc>(reg.desc).format));
@@ -370,6 +373,16 @@ namespace rhi::vk {
         m_physicalToHandle[res] = handle;
         return handle;
     }
+    ResourceHandle VulkanRenderGraph::importSwapchain(rhi::Swapchain* swapchain, StringHash nameHash) {
+        ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
+        ResourceRegistration reg{};
+        reg.isImported = true;
+        reg.swapchain = swapchain;
+        reg.nameHash = nameHash;
+        // 必要であればスワップチェーンの基本情報（フォーマット等）を desc に入れておく
+        m_resourceRegistry.push_back(reg);
+        return handle;
+    }
     ResourceHandle VulkanRenderGraph::createImage(const ImageDesc& desc, StringHash nameHash) {
         ResourceHandle handle = static_cast<ResourceHandle>(m_resourceRegistry.size());
         ResourceRegistration reg{}; reg.isImported = false; reg.desc = desc; reg.nameHash = nameHash;
@@ -405,6 +418,35 @@ namespace rhi::vk {
 
         // 2. アロケータが持つ物理ハンドルマップ（m_imageMap / m_bufferMap）を即座に更新
         m_resourceAllocator.bindPhysicalResource(handle, res);
+    }
+
+    void VulkanRenderGraph::resize(uint32_t width, uint32_t height) {
+        if (width == 0 || height == 0) return;
+        bool needsPatch = false;
+        for (auto& reg : m_resourceRegistry) {
+            if (reg.isImported) continue; // インポートリソース(Swapchain等)は外部で再バインドされるためスキップ
+
+            if (std::holds_alternative<rhi::ImageDesc>(reg.desc)) {
+                auto& imgDesc = std::get<rhi::ImageDesc>(reg.desc);
+                if (imgDesc.sizeMode == rhi::SizeMode::SwapchainRelative) {
+                    imgDesc.width = std::max(1u, static_cast<uint32_t>(width * imgDesc.scaleX));
+                    imgDesc.height = std::max(1u, static_cast<uint32_t>(height * imgDesc.scaleY));
+                    needsPatch = true;
+                }
+            } else if (std::holds_alternative<rhi::BufferDesc>(reg.desc)) {
+                auto& bufDesc = std::get<rhi::BufferDesc>(reg.desc);
+                if (bufDesc.sizeMode == rhi::SizeMode::SwapchainRelative) {
+                    // Bufferの相対サイズは画面ピクセル数等に比例させるなどの計算ロジック
+                    bufDesc.size = static_cast<size_t>(width * height * bufDesc.scale);
+                    needsPatch = true;
+                }
+            }
+        }
+
+        // 更新されたRegistryを元に、物理リソースを動的に再生成(パッチ)する
+        if (needsPatch) {
+            m_resourceAllocator.patchRelativeResources(m_resourceRegistry);
+        }
     }
 
     void VulkanRenderGraph::compile() {
@@ -449,7 +491,8 @@ namespace rhi::vk {
         std::iota(passIndices.begin(), passIndices.end(), 0);
         
         for (size_t i = 0; i < m_resourceRegistry.size(); ++i) {
-            m_resourceRegistry[i].producers.clear(); m_resourceRegistry[i].consumers.clear();
+            m_resourceRegistry[i].producers.clear();
+            m_resourceRegistry[i].consumers.clear();
         }
         for (uint32_t i = 0; i < m_passes.size(); ++i) {
             for (size_t j = 0; j < m_passes[i]->getResourceHandles().size(); ++j) {
@@ -555,7 +598,7 @@ namespace rhi::vk {
                 VulkanResourceState next = MapResourceState(req.state, req.stage);
                 
                 const auto& reg = m_resourceRegistry[h];
-                bool isImg = reg.isImported ? (reg.physicalResource && reg.physicalResource->isImage()) : reg.isImage();
+                bool isImg = reg.isImage();
                 
                 if (currentStates.count(h)) {
                     auto& prevTrack = currentStates[h];
@@ -709,37 +752,50 @@ namespace rhi::vk {
         // --- Swapchain Sync Tracking ---
         for (const auto& [h, track] : currentStates) {
             const auto& reg = m_resourceRegistry[h];
-            bool isImg = reg.isImported ? (reg.physicalResource && reg.physicalResource->isImage()) : reg.isImage();
-            if (isImg && reg.isImported && reg.physicalResource) {
-                VulkanImage* physImg = static_cast<VulkanImage*>(reg.physicalResource);
-                std::cout<<"test_swapchain"<<std::endl;
-                if (physImg->isSwapchainImage()) {
-                    rhi::Swapchain* swapchain = physImg->getSwapchain();                    
-                    uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
-                    uint32_t firstBatchIdx = passToBatch[firstPassIdx];
-                    uint32_t lastBatchIdx = passToBatch[track.lastPassIdx];
-                    std::cout << "Swapchain Image Detected: Resource " << h << ", First Batch " << firstBatchIdx << ", Last Batch " << lastBatchIdx << std::endl;
-                    m_swapchainSyncs.push_back({swapchain, firstBatchIdx, lastBatchIdx});
+            if (reg.swapchain) {
+                uint32_t firstPassIdx = m_resourceLifetimes[h].firstPass;
+                uint32_t firstBatchIdx = passToBatch[firstPassIdx];
+                
+                auto it = currentStates.find(h);
+                if (it != currentStates.end()) {
+                    uint32_t lastBatchIdx = passToBatch[it->second.lastPassIdx];
+                    m_swapchainSyncs.push_back({reg.swapchain, firstBatchIdx, lastBatchIdx});
+                    
                     VirtualImageBarrier presentBarrier;
                     presentBarrier.handle = h;
                     presentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
                     presentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-                    presentBarrier.srcStageMask = track.state.stageMask;
-                    presentBarrier.srcAccessMask = track.state.accessMask;
+                    presentBarrier.srcStageMask = it->second.state.stageMask;
+                    presentBarrier.srcAccessMask = it->second.state.accessMask;
                     presentBarrier.dstStageMask = VK_PIPELINE_STAGE_2_NONE; 
                     presentBarrier.dstAccessMask = VK_ACCESS_2_NONE;
-                    presentBarrier.oldLayout = track.state.layout;
-                    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+                    presentBarrier.oldLayout = it->second.state.layout;
+                    presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // Present用レイアウト
                     
                     m_batches[lastBatchIdx].postImageBarriers.push_back(presentBarrier);
                 }
             }
         }
         m_sortedIndices = sortedIndices;
+
+        std::cout<<"comlie finish"<<std::endl;
     }
 
     void VulkanRenderGraph::execute(const std::vector<SemaphoreHandle>& waitSemaphores) {
         // std::cout << "Executing RenderGraph..." << std::endl;
+
+        // スワップチェーンの自動バインド
+        for (ResourceHandle h = 0; h < m_resourceRegistry.size(); ++h) {
+            auto& reg = m_resourceRegistry[h];
+            if (reg.swapchain) {
+                rhi::Resource* currentBackBuffer = reg.swapchain->getCurrentImage();
+                if (!currentBackBuffer) {
+                    std::cout << "Critical Error: swapchain->getBackBuffer() returned nullptr!" << std::endl;
+                }
+                bindPhysicalResource(h, currentBackBuffer);
+            }
+        }
+
         std::map<QueueType, uint64_t> queueBaseValues;
         for (QueueType type : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
             queueBaseValues[type] = m_device.getTimelineSemaphoreObject(type).getCurrentValue();
@@ -824,17 +880,22 @@ namespace rhi::vk {
                     // --- アタッチメントと解像度の遅延評価 ---
                     std::vector<VulkanCommandList::RenderAttachment> vkColorAtts;
                     std::optional<VulkanCommandList::RenderAttachment> vkDepthAtt = std::nullopt;
-                    uint32_t renderWidth = 0;
-                    uint32_t renderHeight = 0;
+                    uint32_t renderWidth = UINT32_MAX;
+                    uint32_t renderHeight = UINT32_MAX;
 
                     for (const auto& logicalAtt : scope.colorAtts) {
                         VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(logicalAtt.handle);
+                        if (!physImg) {
+                            std::cout << "Error: Physical image is nullptr for handle " << logicalAtt.handle << std::endl;
+                            continue;
+                        }
                         vkColorAtts.push_back({
                             physImg->getView(),
                             logicalAtt.loadOp, logicalAtt.storeOp, logicalAtt.clearValue
                         });
-                        // 最初の有効なアタッチメントから解像度を取得
-                        if (renderWidth == 0) { renderWidth = physImg->getDesc().width; renderHeight = physImg->getDesc().height; }
+                        // アタッチメントの解像度の最小値を使用
+                        renderWidth = std::min(renderWidth, physImg->getDesc().width);
+                        renderHeight = std::min(renderHeight, physImg->getDesc().height);
                     }
 
                     if (scope.depthAtt.has_value()) {
@@ -843,11 +904,33 @@ namespace rhi::vk {
                             physDepth->getView(),
                             scope.depthAtt->loadOp, scope.depthAtt->storeOp, scope.depthAtt->clearValue
                         };
-                        if (renderWidth == 0) { renderWidth = physDepth->getDesc().width; renderHeight = physDepth->getDesc().height; }
+                        renderWidth = std::min(renderWidth, physDepth->getDesc().width);
+                        renderHeight = std::min(renderHeight, physDepth->getDesc().height);
+                    }
+
+                    // アタッチメントが1つもなかった場合のフォールバック
+                    if (renderWidth == UINT32_MAX) { 
+                        renderWidth = 1; 
+                        renderHeight = 1; 
                     }
 
                     const auto* pDepthAtt = vkDepthAtt.has_value() ? &vkDepthAtt.value() : nullptr;
                     cmdList->beginRendering(vkColorAtts, pDepthAtt, renderWidth, renderHeight);
+
+                    // Viewport と Scissor の動的設定
+                    VkViewport viewport{};
+                    viewport.x = 0.0f;
+                    viewport.y = 0.0f; 
+                    viewport.width = static_cast<float>(renderWidth);
+                    viewport.height = static_cast<float>(renderHeight);
+                    viewport.minDepth = 0.0f;
+                    viewport.maxDepth = 1.0f;
+                    vkCmdSetViewport(vkCmdBuf, 0, 1, &viewport);
+
+                    VkRect2D scissor{};
+                    scissor.offset = {0, 0};
+                    scissor.extent = {renderWidth, renderHeight};
+                    vkCmdSetScissor(vkCmdBuf, 0, 1, &scissor);
 
                     // パスの実行
                     for (uint32_t passIdx : scope.passIndices) {

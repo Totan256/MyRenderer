@@ -3,6 +3,7 @@
 #include "VulkanSync.hpp"
 #include "VulkanBuffer.hpp"
 #include <algorithm>
+#include <iostream>
 
 namespace rhi::vk{
     VulkanResourceAllocator::VulkanResourceAllocator(VulkanDevice& device, uint32_t framesInFlight)
@@ -26,6 +27,55 @@ namespace rhi::vk{
         }
     }
     
+    void VulkanResourceAllocator::patchRelativeResources(const std::vector<ResourceRegistration>& registry) {
+        // 登録されている全リソースをチェック
+        for (ResourceHandle h = 0; h < registry.size(); ++h) {
+            const auto& reg = registry[h];
+            if (reg.isImported) continue;
+
+            if (reg.isImage()) {
+                const auto& imgDesc = std::get<ImageDesc>(reg.desc);
+                VulkanImage* currentImg = m_imageMap[h];                
+                // 現在の物理リソースのサイズと、要求されている新しいサイズが異なる場合
+                if (currentImg && !currentImg->getDesc().isCompatible(imgDesc)) {
+                    // 古い画像をプールから探し出して新しいものに置き換える
+                    for (auto& pool : m_imagePools) {
+                        for (auto& entry : pool) {
+                            if (entry.image.get() == currentImg) {
+                                VkImageUsageFlags vkUsage = mapImageUsage(imgDesc.usageFlags);
+                                // unique_ptrを上書き。古いVulkanImageのデストラクタが呼ばれ、enqueueDeletionで安全に遅延破棄される
+                                entry.image = std::make_unique<VulkanImage>(m_device, imgDesc, vkUsage);
+                                m_imageMap[h] = entry.image.get();
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                const auto& bufDesc = std::get<BufferDesc>(reg.desc);
+                VulkanBuffer* currentBuf = m_bufferMap[h];
+                if (currentBuf && !currentBuf->getDesc().isCompatible(bufDesc)) {
+                    for (auto& pool : m_bufferPools) {
+                        for (auto& entry : pool) {
+                            if (entry.buffer.get() == currentBuf) {
+                                VkBufferUsageFlags vkUsage = mapBufferUsage(bufDesc.usageFlags);
+                                entry.buffer = std::make_unique<VulkanBuffer>(
+                                    m_device, 
+                                    m_device.getAllocator(), 
+                                    bufDesc.size,
+                                    vkUsage,
+                                    bufDesc.isCpuVisible ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+                                );
+                                m_bufferMap[h] = entry.buffer.get();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     void VulkanResourceAllocator::allocate(
         uint64_t currentFrameIndex,
         const std::vector<ResourceRegistration>& registry,
@@ -56,10 +106,18 @@ namespace rhi::vk{
             const auto& life = lifetimes[h];
 
             if (reg.isImported) {
-                if (reg.physicalResource->isImage()) {
-                    m_imageMap[h] = static_cast<VulkanImage*>(reg.physicalResource);
+                if (reg.physicalResource) {
+                    if (reg.physicalResource->isImage()) {
+                        m_imageMap[h] = static_cast<VulkanImage*>(reg.physicalResource);
+                    } else {
+                        m_bufferMap[h] = static_cast<VulkanBuffer*>(reg.physicalResource);
+                    }
                 } else {
-                    m_bufferMap[h] = static_cast<VulkanBuffer*>(reg.physicalResource);
+                    if (reg.isImage()) {
+                        m_imageMap[h] = nullptr;
+                    } else {
+                        m_bufferMap[h] = nullptr;
+                    }
                 }
                 continue;
             }

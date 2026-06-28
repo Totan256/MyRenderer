@@ -99,6 +99,7 @@ namespace rhi::vk {
         CopyPass& addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType = QueueType::Transfer) override;
 
         ResourceHandle importResource(Resource* res, StringHash nameHash = {0}) override;
+        ResourceHandle importSwapchain(rhi::Swapchain* swapchain, StringHash nameHash = {0}) override;
         ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = {0}) override;
         ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = {0}) override;
         
@@ -108,6 +109,7 @@ namespace rhi::vk {
         VulkanResourceAllocator& getAllocator() { return m_resourceAllocator; }
 
         void compile() override;
+        void resize(uint32_t width, uint32_t height) override;
         void execute(const std::vector<SemaphoreHandle>& waitSemaphores) override;
 
         void bindPhysicalResource(ResourceHandle handle, Resource* res) override;

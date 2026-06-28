@@ -74,16 +74,31 @@ namespace rhi {
 
     };
 
+    enum class SizeMode { Absolute, SwapchainRelative };
     struct BufferDesc {
         size_t size = 0;
         BufferUsageFlags usageFlags = BufferUsageFlags::None;
         bool isCpuVisible = false;// CPUからアクセス可能か（StagingBufferなどの用途）
-        
+        SizeMode sizeMode = SizeMode::Absolute;
+        float scale = 1.0f; // 相対モード時のスケール
         bool isCompatible(const BufferDesc& other) const {
             bool sizeCompatible = size >= other.size;
             bool usageCompatible = (usageFlags & other.usageFlags) == other.usageFlags;
             bool memoryCompatible = (isCpuVisible == other.isCpuVisible);
             return sizeCompatible && usageCompatible && memoryCompatible;
+        }
+        static BufferDesc Absolute(size_t sz, BufferUsageFlags usage, bool cpuVisible = false) {
+        BufferDesc desc{};
+        desc.size = sz; desc.usageFlags = usage; desc.isCpuVisible = cpuVisible;
+        desc.sizeMode = SizeMode::Absolute;
+        return desc;
+        }
+        // 画面ピクセル数に比例したサイズ（例: G-Bufferのレイ数やライトタイル、パーティクル数バッファなど）
+        static BufferDesc Relative(float s, BufferUsageFlags usage, bool cpuVisible = false) {
+            BufferDesc desc{};
+            desc.scale = s; desc.usageFlags = usage; desc.isCpuVisible = cpuVisible;
+            desc.sizeMode = SizeMode::SwapchainRelative;
+            return desc;
         }
     };
     struct ImageDesc {
@@ -91,7 +106,9 @@ namespace rhi {
         uint32_t mipLevels = 1; uint32_t arrayLayers = 1;
         Format format = Format::R8G8B8A8_Unorm;
         ImageUsageFlags usageFlags = ImageUsageFlags::None;
-
+        SizeMode sizeMode = SizeMode::Absolute;
+        float scaleX = 1.0f;
+        float scaleY = 1.0f;
         bool isCompatible(const ImageDesc& other) const {
             return width == other.width &&
                 height == other.height &&
@@ -100,6 +117,22 @@ namespace rhi {
                 arrayLayers == other.arrayLayers &&
                 format == other.format &&
                 (usageFlags&other.usageFlags) == other.usageFlags;
+        }
+        // 絶対サイズ用のヘルパー
+        static ImageDesc Absolute2D(uint32_t w, uint32_t h, Format fmt, ImageUsageFlags usage) {
+            ImageDesc desc{};
+            desc.width = w; desc.height = h; desc.format = fmt; desc.usageFlags = usage;
+            desc.sizeMode = SizeMode::Absolute;
+            return desc;
+        }
+        // スワップチェーン相対サイズ用のヘルパー
+        static ImageDesc Relative2D(uint32_t width,uint32_t height, float sx, float sy, Format fmt, ImageUsageFlags usage) {
+            ImageDesc desc{};
+            desc.width = (uint32_t)width*sx;
+            desc.height = (uint_fast32_t)height*sy;
+            desc.scaleX = sx; desc.scaleY = sy; desc.format = fmt; desc.usageFlags = usage;
+            desc.sizeMode = SizeMode::SwapchainRelative;
+            return desc;
         }
     };
 

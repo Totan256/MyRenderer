@@ -7,7 +7,9 @@
 
 namespace rhi::vk{
     VulkanImage::VulkanImage(VulkanDevice& device, const ImageDesc& desc, VkImageUsageFlags usage)
-        : m_device(device), m_desc(desc) {
+        : m_device(device){
+        
+        m_desc = desc;
         
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;

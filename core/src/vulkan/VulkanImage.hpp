@@ -33,7 +33,7 @@ namespace rhi::vk{
         rhi::Swapchain* getSwapchain() const override { return m_swapchain; }
 
         bool isImage() const override { return true; }
-        ImageDesc getDesc(){ return m_desc; }
+       
         void recordMipmapGenerationCmds(VkCommandBuffer cmd);
         void registerAsSampledImage();
         VkImageView getMipView(uint32_t mipLevel);
@@ -45,7 +45,6 @@ namespace rhi::vk{
         VmaAllocation m_allocation = VK_NULL_HANDLE;
         rhi::Swapchain* m_swapchain = nullptr;
 
-        ImageDesc m_desc;
         
         rhi::ResourceState m_state = rhi::ResourceState::Undefined;
         rhi::ShaderStage m_stage = rhi::ShaderStage::None;

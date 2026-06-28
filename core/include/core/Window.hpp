@@ -80,6 +80,7 @@ namespace core {
     private:
         GLFWwindow* m_window = nullptr;
         VulkanProvider m_vulkanProvider;
+        bool isResizing = false;
 
         // GLFWコールバックへ渡すための内部データ構造体
         struct WindowData {

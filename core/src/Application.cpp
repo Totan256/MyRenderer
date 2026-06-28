@@ -17,8 +17,8 @@ namespace core {
                 
         uint32_t width = 1280;
         uint32_t height = 720;
-        uint32_t currentImageIndex = 0;
         bool resizeRequested = false;
+        bool isMinimanized = false;
     };
 
     Application::Application(const Config& config) {
@@ -37,9 +37,6 @@ namespace core {
                 m_impl->width = resizeEvent.width;
                 m_impl->height = resizeEvent.height;
                 m_impl->resizeRequested = true;
-                if (m_device) {
-                    m_device->waitForIdle();
-                }
                 this->onResize(resizeEvent.width, resizeEvent.height);
             }
         });
@@ -93,40 +90,54 @@ namespace core {
         m_needsRedraw = true;
     }
 
+    rhi::Swapchain* Application::getSwapchain(){
+        return m_impl->swapchain.get();
+    }
+
     std::optional<FrameInfo> Application::beginFrame() {
         m_impl->window->pollEvents();
         
         // 最小化時は描画をスキップ
-        if (m_impl->window->getWidth() == 0 || m_impl->window->getHeight() == 0) {
+        m_impl->isMinimanized = m_impl->window->getWidth() == 0 || m_impl->window->getHeight() == 0;
+        if(m_impl->isMinimanized){
             return std::nullopt;
         }
+
+        // 管理下のグラフをリサイズ
+        if (m_impl->resizeRequested) {
+            m_device->waitForIdle();
+            uint32_t newW = m_impl->window->getWidth();
+            uint32_t newH = m_impl->window->getHeight();
+            for (auto* graph : m_managedGraphs) {
+                if (graph) {
+                    graph->resize(newW, newH);
+                }
+            }
+            m_impl->resizeRequested = false;
+        }
+
         m_device->beginFrame();
 
-        uint32_t imageIndex;
         
-        if (!m_impl->swapchain->acquireNextImage(imageIndex)) {
+        if (!m_impl->swapchain->acquireNextImage()) {
             m_impl->swapchain->recreate(m_impl->window->getWidth(), m_impl->window->getHeight());
             return std::nullopt; 
         }
 
-        // ここで前フレームのGPU実行完了をフェンスで待機 (CPUがGPUを追い越さないようにする)
-
-        return FrameInfo{m_device->getCurrentFrame(), imageIndex};
+        return FrameInfo{m_device->getCurrentFrame()};
     }
 
-    void Application::endFrame(uint32_t imageIndex) {
+    void Application::endFrame() {
+        //最小化時はスキップ
+        if(m_impl->isMinimanized) return;
+
         // フレームカウンタを進める等の処理
         m_device->endFrame();
 
         // 画面に表示 (内部でPresentSemaphoreを待つ)
-        if (!m_impl->swapchain->present(imageIndex)) {
+        if (!m_impl->swapchain->present()) {
             m_impl->swapchain->recreate(m_impl->window->getWidth(), m_impl->window->getHeight());
         }
-    }
-
-    rhi::Image* Application::getBackImage(uint32_t imageIndex) {
-        // RenderGraphへインポートするために、指定されたインデックスのRawポインタを返す
-        return m_impl->swapchain->getCurrentImage(imageIndex);
     }
 
 } // namespace core

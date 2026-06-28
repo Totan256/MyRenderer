@@ -38,12 +38,14 @@ namespace rhi {
         std::variant<ImageDesc, BufferDesc> desc;
         
         bool isImage() const {
+            if (swapchain) return true;
             if (isImported && physicalResource) return physicalResource->isImage();
             return std::holds_alternative<ImageDesc>(desc);
         }
         
         rhi::Resource* physicalResource = nullptr;
         bool isImported = false;
+        rhi::Swapchain* swapchain = nullptr;
         
         std::vector<uint32_t> producers;
         std::vector<uint32_t> consumers;
@@ -319,6 +321,7 @@ namespace rhi {
         virtual CopyPass& addCopyPass(const std::string& name, ResourceHandle srcBuffer, ResourceHandle dstBuffer, size_t size, QueueType queueType = QueueType::Transfer) = 0;
 
         virtual ResourceHandle importResource(Resource* res, StringHash nameHash = {0}) = 0;
+        virtual ResourceHandle importSwapchain(rhi::Swapchain* swapchain, StringHash nameHash = {0}) = 0;
         virtual ResourceHandle createImage(const ImageDesc& desc, StringHash nameHash = {0}) = 0;
         virtual ResourceHandle createBuffer(const BufferDesc& desc, StringHash nameHash = {0}) = 0;
         
@@ -327,6 +330,7 @@ namespace rhi {
         virtual Device& getDevice() = 0;
 
         virtual void compile() = 0;
+        virtual void resize(uint32_t width, uint32_t height) = 0;
         virtual void execute(const std::vector<SemaphoreHandle>& waitSemaphores = {}) = 0;
 
         virtual void bindPhysicalResource(ResourceHandle handle, Resource* res) = 0;

@@ -26,19 +26,16 @@ public:
         getDevice().getUploadManager()->waitUploads();
         std::cout << "Successfully loaded bunny.obj" << std::endl;
         
-
-        auto depthImage = getDevice().createImage({
-            getWidth(), getHeight(), 1, 1, 1, 
-            rhi::Format::D32_Sfloat, // 深度フォーマット
-            rhi::ImageUsageFlags::DepthStencilAttachment | rhi::ImageUsageFlags::Storage
-        });
-
-
         auto graph = getDevice().createRenderGraph();
-        // スワップチェーンの画像を取得してGraphにインポートする
-        auto swapchainImage = this->getBackImage(0); // ※環境に合わせて取得メソッドを変更してください
-        auto hSwapchainImg = graph->importResource(swapchainImage, "swapchainImage"_hash);
-        auto hDepthImg = graph->importResource(depthImage.get(), "depthImage"_hash);
+        registerRenderGraph(graph.get());
+
+        auto hDepthImg = graph->createImage(
+            rhi::ImageDesc::Relative2D(getWidth(), getHeight(), 1.0f,1.0f,
+                rhi::Format::D32_Sfloat, 
+                rhi::ImageUsageFlags::DepthStencilAttachment | rhi::ImageUsageFlags::Storage), "depthImage"_hash);
+    
+        auto hSwapchainImg = graph->importSwapchain(getSwapchain(), "swapchainImage"_hash);
+        
 
         // 2. モデルのバッファ群をRenderGraphに一括インポート
         // 内部で "ModelPos"_hash, "ModelAttr"_hash, "ModelIdx"_hash が登録されます
@@ -68,13 +65,12 @@ public:
         }
 
         graph->compile();
+        std::cout<<"start loop"<<std::endl;
         while (isRunning()) {
-            auto frameInfo = this->beginFrame();
-            if(!frameInfo) continue;
+            if (!this->beginFrame()) continue;
 
-            graph->bindPhysicalResource(hSwapchainImg, this->getBackImage(frameInfo->imageIndex));
-            graph->execute({});
-            this->endFrame(frameInfo->imageIndex);
+            graph->execute();
+            this->endFrame();
         }
         this->getDevice().waitForIdle();
     }

@@ -113,7 +113,7 @@ namespace rhi::vk {
         createInfo.presentMode = presentMode;
         createInfo.clipped = VK_TRUE;
 
-        // ★ リサイズ時の最適化 (古いスワップチェーンを渡す)
+        // リサイズ時の最適化 (古いスワップチェーンを渡す)
         VkSwapchainKHR oldSwapchain = m_swapchain;
         createInfo.oldSwapchain = oldSwapchain;
 
@@ -193,7 +193,7 @@ namespace rhi::vk {
     }
 
     // --- メインループから呼ばれる関数 ---
-    bool VulkanSwapchain::acquireNextImage(uint32_t& imageIndex) {
+    bool VulkanSwapchain::acquireNextImage() {
         uint32_t frameIdx = m_device.getCurrentFrame() % MAX_FRAMES_IN_FLIGHT;
         
         m_currentAcquireSemaphore = m_acquireSemaphores[frameIdx];
@@ -202,7 +202,7 @@ namespace rhi::vk {
         VkResult result = vkAcquireNextImageKHR(
             m_device.getDevice(), m_swapchain, 
             std::numeric_limits<uint64_t>::max(), 
-            m_currentAcquireSemaphore, VK_NULL_HANDLE, &imageIndex
+            m_currentAcquireSemaphore, VK_NULL_HANDLE, &m_currentImageIndex
         );
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) return false;
@@ -210,7 +210,7 @@ namespace rhi::vk {
         return true;
     }
 
-    bool VulkanSwapchain::present(uint32_t imageIndex) {
+    bool VulkanSwapchain::present() {
         VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
         
         // acquireNextImageで設定した現在のセマフォを待機
@@ -220,7 +220,7 @@ namespace rhi::vk {
         VkSwapchainKHR swapchains[] = {m_swapchain};
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapchains;
-        presentInfo.pImageIndices = &imageIndex;
+        presentInfo.pImageIndices = &m_currentImageIndex;
         VkResult result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) return false;

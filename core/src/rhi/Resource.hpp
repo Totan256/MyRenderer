@@ -12,6 +12,7 @@ namespace rhi {
         virtual bool isImage() const = 0;
         virtual ResourceState getCurrentState() const = 0;
         virtual ShaderStage getCurrentStage() const = 0;
+        ImageDesc getDesc(){ return m_desc; }
         
         // --- 同期状態の追跡 (Timeline Semaphore 用) ---
         void setWriteSync(SyncPoint sp) { m_writeSync = sp; }
@@ -24,6 +25,7 @@ namespace rhi {
     protected:
         std::vector<SyncPoint> m_readSyncs;
         SyncPoint m_writeSync;
+        ImageDesc m_desc;
         
     };
 

@@ -3,12 +3,14 @@
 #include <string>
 #include <memory>
 #include <cstdint>
+#include <vector>
 #include <optional>
 
 namespace rhi {
     class Device;
     class Swapchain;
     class Image;
+    class RenderGraph;
 }
 
 namespace core {
@@ -18,7 +20,6 @@ enum class AppMode { RealTime, OnDemand };
 // フレームの開始時に開発者に渡される同期・リソース情報
 struct FrameInfo {
     uint64_t frameIndex;  // 何番目のフレームか（定数バッファの切り替え等に使用）
-    uint32_t imageIndex;  // スワップチェーンのどの画像か（テクスチャバインディング等に使用）
 };
 
 class Application {
@@ -40,16 +41,25 @@ public:
     void processEvents();
     void waitWindowEvents();
     void requestRedraw();
+
+    // レンダーグラフ管理
+    void registerRenderGraph(rhi::RenderGraph* graph) {
+        m_managedGraphs.push_back(graph);
+    }
+    void unregisterRenderGraph(rhi::RenderGraph* graph) {
+        if (!graph) return;
+        std::erase(m_managedGraphs, graph);
+    }
+
     
     // --- 変更後のフレーム管理 ---
     // 描画不可能な状態（最小化やリサイズ中）の場合は std::nullopt を返す
     std::optional<FrameInfo> beginFrame();
-    void endFrame(uint32_t imageIndex);
+    void endFrame();
 
     // イメージインデックスから対応するバックバッファを取得する
-    rhi::Image* getBackImage(uint32_t imageIndex);
     rhi::Device& getDevice() { return *m_device; }
-    rhi::Swapchain& getSwapchain() { return *m_swapchain; }
+    rhi::Swapchain* getSwapchain();
 
     float getDeltaTime() const { return m_deltaTime; }
     uint32_t getWidth() const;
@@ -62,7 +72,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
     std::unique_ptr<rhi::Device> m_device;
-    std::unique_ptr<rhi::Swapchain> m_swapchain;
+    std::vector<rhi::RenderGraph*> m_managedGraphs;
     AppMode m_mode;
     bool m_needsRedraw = true;
     float m_deltaTime = 0.0f;

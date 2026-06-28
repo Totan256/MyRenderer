@@ -19,12 +19,12 @@ public:
     virtual ~Swapchain() = default;
 
     virtual void recreate(uint32_t width, uint32_t height) = 0;
-    virtual rhi::Image* getCurrentImage(uint32_t index) const = 0;
+    virtual rhi::Image* getCurrentImage() const = 0;
     virtual uint32_t getImageCount() const = 0;
     virtual uint32_t getWidth() const = 0;
     virtual uint32_t getHeight() const = 0;
-    virtual bool acquireNextImage(uint32_t& imageIndex) = 0;
-    virtual bool present(uint32_t imageIndex) = 0;
+    virtual bool acquireNextImage() = 0;
+    virtual bool present() = 0;
 
     // 現在のフレームにおける描画開始待ち(Acquire)用セマフォハンドルを取得
     virtual SemaphoreHandle getCurrentAcquireSemaphore() const = 0;
