@@ -9,6 +9,7 @@
 #include "core/Window.hpp"
 #include "core/RenderGraph.hpp"
 #include "CommandList.hpp"
+#include "GPUProfiler.hpp"
 #include "UploadManager.hpp"
 
 namespace rhi {
@@ -38,10 +39,13 @@ namespace rhi {
         virtual std::unique_ptr<RenderGraph> createRenderGraph() = 0; // 必要に応じて追加
         virtual std::unique_ptr<CommandList> createCommandList(QueueType queueType = QueueType::Compute) = 0;
         virtual std::unique_ptr<Swapchain> createSwapchain(const core::Window& window, const SwapchainConfig& config = {}) = 0;
+        virtual std::unique_ptr<GPUProfiler> createGPUProfiler() = 0;
         // アップロードマネージャーの取得
         virtual UploadManager* getUploadManager() = 0;
 
         // 削除キューへの登録 (内部用)
         virtual void enqueueDeletion(std::function<void()>&& deletionFunc) = 0;
+
+        
     };
 }

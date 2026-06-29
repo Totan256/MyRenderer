@@ -508,6 +508,15 @@ namespace rhi::vk {
         // 2. Sort & Allocate
         std::vector<uint32_t> sortedIndices = getSortPasses(passIndices);
         calculateLifetimes(sortedIndices);
+        // --- Profiler Pass Registration ---
+        if (m_profiler) {
+            m_profiler->reset();
+            for (uint32_t passIdx : sortedIndices) {
+                auto& pass = m_passes[passIdx];
+                uint32_t baseIdx = m_profiler->registerPass(pass->getName());
+                pass->setQueryIndices(baseIdx, baseIdx + 1);
+            }
+        }
         std::cout << "Sorted Pass Indices: ";
         m_resourceAllocator.allocate(m_device.getCurrentFrame(), m_resourceRegistry, m_resourceLifetimes);
         std::cout << "Resource Allocation Done." << std::endl;
@@ -827,6 +836,9 @@ namespace rhi::vk {
         m_submitBatches.clear();
         SubmitBatch currentSubmitBatch;
 
+        uint32_t frameQueryOffset = m_profiler ? m_profiler->getFrameQueryOffset(m_device.getCurrentFrame()) : 0;
+
+
         for (size_t batchIdx = 0; batchIdx < m_batches.size(); ++batchIdx) {
             auto& batch = m_batches[batchIdx];
             auto& poolData = currentFrameData.pools[batch.queueType];
@@ -837,6 +849,15 @@ namespace rhi::vk {
             VulkanCommandList* cmdList = poolData.commandLists[poolData.activeCount++].get();
             cmdList->begin();
             auto vkCmdBuf = cmdList->getCommandBuffer();
+
+            if (m_profiler) {
+                for (auto& scope : batch.scopes) {
+                    for (uint32_t passIdx : scope.passIndices) {
+                        uint32_t startQuery = frameQueryOffset + m_passes[passIdx]->getStartQueryIndex();
+                        cmdList->resetQueryPool(m_profiler, startQuery, 2);
+                    }
+                }
+            }
 
             std::vector<VkImageMemoryBarrier2> actualImageBarriers;
             std::vector<VkBufferMemoryBarrier2> actualBufferBarriers;
@@ -934,12 +955,25 @@ namespace rhi::vk {
 
                     // パスの実行
                     for (uint32_t passIdx : scope.passIndices) {
+                        if (m_profiler) {
+                            cmdList->writeTimestamp(m_profiler, frameQueryOffset + m_passes[passIdx]->getStartQueryIndex(), rhi::PipelineStage::TopOfPipe);
+                        }
                         executePass(m_passes[passIdx].get(), *cmdList);
+                        if (m_profiler) {
+                            cmdList->writeTimestamp(m_profiler, frameQueryOffset + m_passes[passIdx]->getEndQueryIndex(), rhi::PipelineStage::BottomOfPipe);
+                        }
                     }
                     cmdList->endRendering();
                 } else {
                     for (uint32_t passIdx : scope.passIndices) {
+                        if (m_profiler) {
+                            cmdList->writeTimestamp(m_profiler, frameQueryOffset + m_passes[passIdx]->getStartQueryIndex(), rhi::PipelineStage::TopOfPipe);
+                        }
                         executePass(m_passes[passIdx].get(), *cmdList);
+                        if (m_profiler) {
+                            auto stage = m_passes[passIdx]->getType() == PassType::Compute ? rhi::PipelineStage::ComputeShader : rhi::PipelineStage::Transfer;
+                            cmdList->writeTimestamp(m_profiler, frameQueryOffset + m_passes[passIdx]->getEndQueryIndex(), stage);
+                        }
                     }
                 }
             }

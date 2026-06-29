@@ -60,6 +60,7 @@ namespace rhi::vk{
         std::unique_ptr<RenderGraph> createRenderGraph() override;
         std::unique_ptr<rhi::CommandList> createCommandList(QueueType queueType = QueueType::Compute) override;
         std::unique_ptr<rhi::Swapchain> createSwapchain(const core::Window& window, const SwapchainConfig& config = {}) override;
+        std::unique_ptr<rhi::GPUProfiler> createGPUProfiler() override;
 
         SyncPoint advanceTimeline(QueueType type) override;
         uint64_t getCompletedTimelineValue(QueueType type) override;

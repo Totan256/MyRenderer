@@ -108,6 +108,9 @@ namespace rhi::vk {
         Device& getDevice() override { return m_device; }
         VulkanResourceAllocator& getAllocator() { return m_resourceAllocator; }
 
+        void setProfiler(GPUProfiler* profiler) override { m_profiler = profiler; }
+        GPUProfiler* getProfiler() const override { return m_profiler; }
+
         void compile() override;
         void resize(uint32_t width, uint32_t height) override;
         void execute(const std::vector<SemaphoreHandle>& waitSemaphores) override;

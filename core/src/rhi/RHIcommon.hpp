@@ -4,6 +4,14 @@
 namespace rhi {
     using SemaphoreHandle = void*;// 同期用の抽象ハンドル
     
+    enum class PipelineStage {
+        TopOfPipe,
+        BottomOfPipe,
+        ComputeShader,
+        AllGraphics,
+        Transfer
+    };
+    
     struct SwapchainConfig {
         bool enableLowLatency = true;        // true = MAILBOX(Fast V-Sync), false = FIFO(V-Sync ON)
         uint32_t desiredBufferCount = 3;     // 希望するバッファ数 (デフォルトはトリプルバッファリング)

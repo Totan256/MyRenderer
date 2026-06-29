@@ -11,6 +11,7 @@
 #include "VulkanResourceAllocator.hpp"
 #include "VulkanUploadManager.hpp"
 #include "VulkanSwapchain.hpp"
+#include "VulkanGPUProfiler.hpp"
 #include <iostream>
 #include <fstream>
 #include <set>
@@ -82,6 +83,9 @@ namespace rhi::vk{
         auto rawSurface = core::Window::createVulkanSurface(m_instance, m_provider.nativeWindowHandle);
         VkSurfaceKHR surface = static_cast<VkSurfaceKHR>(rawSurface);
         return std::make_unique<VulkanSwapchain>(*this, surface, config, window);
+    }
+    std::unique_ptr<rhi::GPUProfiler> VulkanDevice::createGPUProfiler() {
+        return std::make_unique<VulkanGPUProfiler>(*this, m_framesInFlight);
     }
     VulkanShaderCache& VulkanDevice::getShaderCache() {
         return *m_shaderCache; 

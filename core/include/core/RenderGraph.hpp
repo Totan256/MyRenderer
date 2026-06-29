@@ -16,6 +16,7 @@
 #include "rhi/Resource.hpp"
 #include "rhi/CommandList.hpp"
 #include "utils/StringHash.hpp"
+#include "rhi/GPUProfiler.hpp"
 
 namespace rhi {
     using ResourceHandle = uint32_t;
@@ -79,6 +80,10 @@ namespace rhi {
         RenderPass& forceBatchBreak() { m_forceBatchBreak = true; return *this; }
         bool isForceBatchBreak() const { return m_forceBatchBreak; }
 
+        void setQueryIndices(uint32_t start, uint32_t end) { m_startQueryIndex = start; m_endQueryIndex = end; }
+        uint32_t getStartQueryIndex() const { return m_startQueryIndex; }
+        uint32_t getEndQueryIndex() const { return m_endQueryIndex; }
+
         const std::map<uint32_t, ResourceState>& getSignature() const { return m_signature; }
         const std::vector<ResourceHandle>& getResourceHandles() const { return m_resourceHandles; }
         const std::vector<ResourceRequirement>& getRequirements() const { return m_requirements; }
@@ -117,6 +122,9 @@ namespace rhi {
         std::vector<ResourceHandle> m_resourceHandles;
         std::vector<ResourceRequirement> m_requirements;
         bool m_forceBatchBreak = false;
+
+        uint32_t m_startQueryIndex = 0;
+        uint32_t m_endQueryIndex = 0;
     };
 
     // =========================================================
@@ -329,6 +337,9 @@ namespace rhi {
         virtual uint32_t getPhysicalIndex(ResourceHandle handle) = 0;
         virtual Device& getDevice() = 0;
 
+        virtual void setProfiler(GPUProfiler* profiler) = 0;
+        virtual GPUProfiler* getProfiler() const = 0;
+
         virtual void compile() = 0;
         virtual void resize(uint32_t width, uint32_t height) = 0;
         virtual void execute(const std::vector<SemaphoreHandle>& waitSemaphores = {}) = 0;
@@ -342,6 +353,7 @@ namespace rhi {
         std::vector<uint32_t> getSortPasses(std::vector<uint32_t> passIndices);
         void calculateLifetimes(const std::vector<uint32_t>& sortedPassIndices);
         
+        GPUProfiler* m_profiler = nullptr;
         std::vector<ResourceRegistration> m_resourceRegistry;
         std::vector<ResourceLifetime> m_resourceLifetimes;
         std::vector<std::unique_ptr<RenderPass>> m_passes;

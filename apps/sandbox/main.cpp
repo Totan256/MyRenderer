@@ -64,14 +64,23 @@ public:
             }
         }
 
+        auto profiler = getDevice().createGPUProfiler();
+        graph->setProfiler(profiler.get());
+
         graph->compile();
         std::cout<<"start loop"<<std::endl;
         while (isRunning()) {
             if (!this->beginFrame()) continue;
 
+            profiler->resolveResults(getDevice().getCurrentFrame());
+            if(profiler->hasNewResults() && getDevice().getCurrentFrame()%3000==0) {
+                profiler->dumpToConsole();
+            }
+
             graph->execute();
             this->endFrame();
         }
+
         this->getDevice().waitForIdle();
     }
 };

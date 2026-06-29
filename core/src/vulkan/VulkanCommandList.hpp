@@ -31,6 +31,10 @@ namespace rhi::vk{
         // コマンドの送信と完了待機（オフラインレンダリング用）
         void submitAndWait() override;
 
+        // プロファイリング用
+        void resetQueryPool(GPUProfiler* profiler, uint32_t firstQuery, uint32_t queryCount) override;
+        void writeTimestamp(GPUProfiler* profiler, uint32_t queryIndex, PipelineStage stage) override;
+
         // Dynamic Rendering の開始・終了
         void beginRendering(const std::vector<RenderAttachment>& colorAtts, const RenderAttachment* depthAtt, uint32_t width, uint32_t height);
         void setTopology(VkPrimitiveTopology topology);

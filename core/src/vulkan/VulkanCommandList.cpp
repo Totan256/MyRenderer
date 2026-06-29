@@ -1,4 +1,5 @@
 ﻿#include "VulkanCommandList.hpp"
+#include "VulkanGPUProfiler.hpp"
 // #include "RHI.hpp"
 #include <stdexcept>
 #include <iostream>
@@ -137,6 +138,27 @@ namespace rhi::vk {
 
         vkWaitForFences(m_device.getDevice(), 1, &m_fence, VK_TRUE, UINT64_MAX);
         vkResetFences(m_device.getDevice(), 1, &m_fence);
+    }
+
+    void VulkanCommandList::resetQueryPool(GPUProfiler* profiler, uint32_t firstQuery, uint32_t queryCount) {
+        if (!profiler) return;
+        auto* vkProfiler = static_cast<VulkanGPUProfiler*>(profiler);
+        vkCmdResetQueryPool(m_commandBuffer, vkProfiler->getQueryPool(), firstQuery, queryCount);
+    }
+
+    void VulkanCommandList::writeTimestamp(GPUProfiler* profiler, uint32_t queryIndex, rhi::PipelineStage stage) {
+        if (!profiler) return;
+        auto* vkProfiler = static_cast<VulkanGPUProfiler*>(profiler);
+        
+        VkPipelineStageFlags2 vkStage = VK_PIPELINE_STAGE_2_NONE;
+        switch (stage) {
+            case rhi::PipelineStage::TopOfPipe: vkStage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT; break;
+            case rhi::PipelineStage::BottomOfPipe: vkStage = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT; break;
+            case rhi::PipelineStage::ComputeShader: vkStage = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT; break;
+            case rhi::PipelineStage::AllGraphics: vkStage = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT; break;
+            case rhi::PipelineStage::Transfer: vkStage = VK_PIPELINE_STAGE_2_TRANSFER_BIT; break;
+        }
+        vkCmdWriteTimestamp2(m_commandBuffer, vkStage, vkProfiler->getQueryPool(), queryIndex);
     }
 
     void VulkanCommandList::beginRendering(const std::vector<RenderAttachment>& colorAtts, const RenderAttachment* depthAtt, uint32_t width, uint32_t height) {
