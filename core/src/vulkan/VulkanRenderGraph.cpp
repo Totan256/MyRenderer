@@ -129,7 +129,10 @@ namespace rhi::vk {
             for (auto& state : m_dispatches) {
                 auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms);
                 if (pack.size > 0) vkCmd.setPushData(0, pack.size, pack.data.data());
-                vkCmd.dispatch(state.m_x, state.m_y, state.m_z);
+                // 動的にディスパッチサイズを評価
+                uint32_t dispatchX, dispatchY, dispatchZ;
+                state.evaluateSize(dispatchX, dispatchY, dispatchZ);
+                vkCmd.dispatch(dispatchX, dispatchY, dispatchZ);
             }
         }
     private:

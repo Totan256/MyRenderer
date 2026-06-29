@@ -191,10 +191,22 @@ namespace rhi {
     class ComputePass;
     class ComputeDispatch : public ResourceBindingBuilder<ComputeDispatch, ComputePass> {
     public:
+        using SizeCalcFunc = std::function<void(uint32_t&, uint32_t&, uint32_t&)>;
         ComputeDispatch(ComputePass& pass, RenderGraph& graph, uint32_t x, uint32_t y, uint32_t z)
             : ResourceBindingBuilder(pass, graph), m_x(x), m_y(y), m_z(z) {}
+        ComputeDispatch(ComputePass& pass, RenderGraph& graph, SizeCalcFunc sizeFunc)
+            : ResourceBindingBuilder(pass, graph), m_x(0), m_y(0), m_z(0), m_sizeFunc(std::move(sizeFunc)) {}
 
         uint32_t m_x, m_y, m_z;
+        SizeCalcFunc m_sizeFunc;
+        void evaluateSize(uint32_t& outX, uint32_t& outY, uint32_t& outZ) const {
+            if (m_sizeFunc) {
+                outX = 1; outY = 1; outZ = 1; 
+                m_sizeFunc(outX, outY, outZ);
+            } else {
+                outX = m_x; outY = m_y; outZ = m_z;
+            }
+        }
     };
 
     class ComputePass : public RenderPass {
@@ -206,12 +218,26 @@ namespace rhi {
             m_dispatches.emplace_back(*this, m_graph, x, y, z);
             return m_dispatches.back();
         }
-
+        ComputeDispatch& dispatch(ComputeDispatch::SizeCalcFunc sizeFunc) {
+            m_dispatches.emplace_back(*this, m_graph, std::move(sizeFunc));
+            return m_dispatches.back();
+        }
         ComputeDispatch& dispatchThreads(uint32_t width, uint32_t height, uint32_t depth = 1) {
             uint32_t gx = (width + m_localSizeX - 1) / m_localSizeX;
             uint32_t gy = (height + m_localSizeY - 1) / m_localSizeY;
             uint32_t gz = (depth + m_localSizeZ - 1) / m_localSizeZ;
             return dispatch(gx, gy, gz);
+        }
+        ComputeDispatch& dispatchThreads(ComputeDispatch::SizeCalcFunc sizeFunc) {
+            auto wrappedFunc = [this, func = std::move(sizeFunc)](uint32_t& x, uint32_t& y, uint32_t& z) {
+                uint32_t w = 1, h = 1, d = 1;
+                func(w, h, d); // ユーザーのラムダで動的な width, height, depth を取得
+                x = (w + m_localSizeX - 1) / m_localSizeX;
+                y = (h + m_localSizeY - 1) / m_localSizeY;
+                z = (d + m_localSizeZ - 1) / m_localSizeZ;
+            };
+            m_dispatches.emplace_back(*this, m_graph, std::move(wrappedFunc));
+            return m_dispatches.back();
         }
 
         const std::map<StringHash, uint32_t>& getPushConstantOffsets() const { return m_pushConstantOffsets; }
