@@ -108,6 +108,14 @@ namespace rhi::vk {
         // ※キューファミリの扱いは、現在単一のキュー(Graphics兼Present)を想定しています
         createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+        // Compute Shader (Storage Image) として利用できるように STORAGE_BIT を追加
+        if (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
+            createInfo.imageUsage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        } else {
+            // モバイル環境など、サーフェスへの直接のStorage書き込みがサポートされていない場合への警告
+            std::cerr << "Warning: Swapchain does not support VK_IMAGE_USAGE_STORAGE_BIT. Direct Compute Shader write may fail." << std::endl;
+        }
+
         createInfo.preTransform = capabilities.currentTransform;
         createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         createInfo.presentMode = presentMode;
