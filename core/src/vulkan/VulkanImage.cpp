@@ -77,6 +77,12 @@ namespace rhi::vk{
         if (vkCreateImageView(m_device.getDevice(), &viewInfo, nullptr, &m_view) != VK_SUCCESS) {
             throw std::runtime_error("Failed to create image view for swapchain image!");
         }
+        
+        if(swapchain->isEnableForCompute()){
+            m_bindlessIndex = m_device.registerImage(m_view); 
+        }else{
+            m_bindlessIndex = 0;
+        }
     }
 
     VulkanImage::~VulkanImage(){
@@ -101,7 +107,9 @@ namespace rhi::vk{
                 vkDestroyImageView(logicalDevice, mipView, nullptr);
             }
             if (view != VK_NULL_HANDLE) {
-                device.unregisterIndex(bindlessIdx, 1); // 1 = StorageImage
+                    if (bindlessIdx != 0) {
+                    device.unregisterIndex(bindlessIdx, 1); // 1 = StorageImage
+                }
                 if (bindlessSampledIdx != 0) {
                     device.unregisterIndex(bindlessSampledIdx, 3); // 3 = SampledImage
                 }

@@ -15,6 +15,7 @@ namespace rhi {
     struct SwapchainConfig {
         bool enableLowLatency = true;        // true = MAILBOX(Fast V-Sync), false = FIFO(V-Sync ON)
         uint32_t desiredBufferCount = 3;     // 希望するバッファ数 (デフォルトはトリプルバッファリング)
+        bool enableComputePresent = false;   // computeからの直接書き込み
     };
 
     struct GraphSignal {

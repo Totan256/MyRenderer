@@ -4,24 +4,21 @@
 #include "rhi/Device.hpp"
 #include "utils/ImageExporter.hpp"
 #include <iostream>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <cstring>
 
 class SandboxApp : public core::Application {
 public:
-    SandboxApp() : Application({ "MyRenderer Realtime", 1280, 720 }) {
+    SandboxApp() : Application({ "MyRenderer Realtime Raytracing", 1280, 720 }) {
         std::cout << "SandboxApp Initialized." << std::endl;
     }
 
     void run() {
         std::cout << "--- Loading Model Assets ---" << std::endl;
-        // 1. アセットファイルからロードして初期化
-    
-        // assets/bunny.obj からデータを読み込む
         CpuModelData cpuData = ModelImporter::loadFromFile("assets/bunny.obj");
-        
-        // GPUバッファの作成とアップロードのキューイング
         auto bunnyModel = ModelBuilder::buildAndEnqueue(getDevice(), getDevice().getUploadManager(), cpuData);
         
-        // 転送コマンドの即時送信と完了待機
         getDevice().getUploadManager()->submitUploadsAsync();
         getDevice().getUploadManager()->waitUploads();
         std::cout << "Successfully loaded bunny.obj" << std::endl;
@@ -29,51 +26,67 @@ public:
         auto graph = getDevice().createRenderGraph();
         registerRenderGraph(graph.get());
 
-        auto hDepthImg = graph->createImage(
-            rhi::ImageDesc::Relative2D(getWidth(), getHeight(), 1.0f,1.0f,
-                rhi::Format::D32_Sfloat, 
-                rhi::ImageUsageFlags::DepthStencilAttachment | rhi::ImageUsageFlags::Storage), "depthImage"_hash);
-    
+        // スワップチェーン画像を登録
         auto hSwapchainImg = graph->importSwapchain(getSwapchain(), "swapchainImage"_hash);
         
-
-        // 2. モデルのバッファ群をRenderGraphに一括インポート
-        // 内部で "ModelPos"_hash, "ModelAttr"_hash, "ModelIdx"_hash が登録されます
         if (bunnyModel) {
             bunnyModel->importToGraph(*graph);
         }
 
-        // 3. グラフィックパスクラスの構築
-        auto& pass = graph->addGraphicsPass("ModelRenderPass", "shaders/model.vert", "shaders/model.frag")
-            .addColorOutput(0, hSwapchainImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {0.05f, 0.05f, 0.1f, 1.0f})
-            .setDepthOutput(hDepthImg, rhi::LoadOp::Clear, rhi::StoreOp::Store, {1.0f, 0})
-            .setGraphicsState({
-                .cullMode = rhi::CullMode::Back, // 背面カリングを有効
-                .depthTestEnable = true,         // 深度テストを有効
-                .depthWriteEnable = true         // 深度書き込みを有効
+        // ポリゴン（インデックス）の総数を計算
+        uint32_t totalIndices = 0;
+        if (bunnyModel) {
+            for (const auto& sm : bunnyModel->subMeshes) {
+                totalIndices += sm.indexCount;
+            }
+        }
+
+        // --- コンピュートパスの構築 ---
+        auto& pass = graph->addComputePass("RaytracePass", "shaders/raytrace.comp");
+        
+        // ウィンドウサイズに追従するようにディスパッチサイズをラムダで動的設定
+        auto& dispatch = pass.dispatchThreads(
+            [this](uint32_t& w, uint32_t& h, uint32_t& d) {
+                w = getWidth(); h = getHeight(); d = 1;
             });
 
+        // リソースバインディング
+        dispatch.write(hSwapchainImg); // resolveOffset経由で pc.swapchainImage にインデックスが渡る
         if (bunnyModel) {
-            // サブメッシュごとに描画コマンドをレコード
-            // PVP方式のため、頂点数として「インデックス数」を流し込みます
-            for (const auto& subMesh : bunnyModel->subMeshes) {
-                pass.draw(subMesh.indexCount, 1, subMesh.indexBase, 0)
-                    .read(bunnyModel->hPosition)
+            dispatch.read(bunnyModel->hPosition)
                     .read(bunnyModel->hAttribute)
                     .read(bunnyModel->hIndex);
-            }
         }
 
         auto profiler = getDevice().createGPUProfiler();
         graph->setProfiler(profiler.get());
 
         graph->compile();
-        std::cout<<"start loop"<<std::endl;
+        std::cout << "Start RT Loop" << std::endl;
+        
+        float time = 0.0f;
+        
         while (isRunning()) {
             if (!this->beginFrame()) continue;
 
+            // 簡易的な時間更新
+            time += 0.016f;
+
+            // --- Push Constants の設定 ---
+            glm::vec4 camPos_time(0.0f, 2.0f, 6.0f, time);
+            
+            glm::vec4 camTarget_numIndices(0.0f, 0.5f, 0.0f, 0.0f);
+            // floatのビット列を維持したままuint32_tを詰め込む
+            std::memcpy(&camTarget_numIndices.w, &totalIndices, sizeof(uint32_t));
+            
+            glm::vec4 resolution_fov(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);
+
+            dispatch.setUniform("camPos_time"_hash, camPos_time)
+                    .setUniform("camTarget_numIdx"_hash, camTarget_numIndices)
+                    .setUniform("resolution_fov"_hash, resolution_fov);
+
             profiler->resolveResults(getDevice().getCurrentFrame());
-            if(profiler->hasNewResults() && getDevice().getCurrentFrame()%3000==0) {
+            if(profiler->hasNewResults() && getDevice().getCurrentFrame() % 3000 == 0) {
                 profiler->dumpToConsole();
             }
 

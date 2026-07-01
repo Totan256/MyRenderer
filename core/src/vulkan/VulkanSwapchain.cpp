@@ -103,17 +103,35 @@ namespace rhi::vk {
         createInfo.imageColorSpace = surfaceFormat.colorSpace;
         createInfo.imageExtent = extent;
         createInfo.imageArrayLayers = 1;
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT; // UI描画や画面クリア用
+        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-        // ※キューファミリの扱いは、現在単一のキュー(Graphics兼Present)を想定しています
-        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        uint32_t graphicsFamily = m_device.getQueueFamilyIndex(rhi::QueueType::Graphics);
+        uint32_t computeFamily = m_device.getQueueFamilyIndex(rhi::QueueType::Compute);
+        uint32_t queueFamilyIndices[] = { graphicsFamily, computeFamily };
 
-        // Compute Shader (Storage Image) として利用できるように STORAGE_BIT を追加
-        if (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) {
-            createInfo.imageUsage |= VK_IMAGE_USAGE_STORAGE_BIT;
+        if (graphicsFamily != computeFamily) {
+            createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            createInfo.queueFamilyIndexCount = 2;
+            createInfo.pQueueFamilyIndices = queueFamilyIndices;
         } else {
-            // モバイル環境など、サーフェスへの直接のStorage書き込みがサポートされていない場合への警告
-            std::cerr << "Warning: Swapchain does not support VK_IMAGE_USAGE_STORAGE_BIT. Direct Compute Shader write may fail." << std::endl;
+            createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            createInfo.queueFamilyIndexCount = 0;
+            createInfo.pQueueFamilyIndices = nullptr;
+        }
+
+        bool supportsStorage = m_config.enableComputePresent && 
+                      ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_STORAGE_BIT) != 0);
+
+        if (supportsStorage) {
+            VkFormatProperties formatProps;
+            vkGetPhysicalDeviceFormatProperties(physicalDevice, surfaceFormat.format, &formatProps);
+            if ((formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0) {
+                supportsStorage = false;
+            }
+        }
+
+        if (supportsStorage) {
+            createInfo.imageUsage |= VK_IMAGE_USAGE_STORAGE_BIT;
         }
 
         createInfo.preTransform = capabilities.currentTransform;
@@ -168,12 +186,51 @@ namespace rhi::vk {
 
     // --- ヘルパー関数群 ---
     VkSurfaceFormatKHR VulkanSwapchain::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
-        for (const auto& availableFormat : availableFormats) {
-            // SRGBが利用可能なら優先
-            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-                return availableFormat;
+        VkPhysicalDevice physicalDevice = m_device.getPhysicalDevice();
+
+        // --- パターンA: コンピュート直接書き込みが有効な場合 ---
+        if (m_config.enableComputePresent) {
+            // 1. sRGBかつStorage対応のものを最優先
+            for (const auto& availableFormat : availableFormats) {
+                if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                    VkFormatProperties formatProps;
+                    vkGetPhysicalDeviceFormatProperties(physicalDevice, availableFormat.format, &formatProps);
+                    if (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+                        return availableFormat;
+                    }
+                }
+            }
+            // 2. UNORMかつStorage対応のものを探す
+            for (const auto& availableFormat : availableFormats) {
+                if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM || availableFormat.format == VK_FORMAT_R8G8B8A8_UNORM) {
+                    VkFormatProperties formatProps;
+                    vkGetPhysicalDeviceFormatProperties(physicalDevice, availableFormat.format, &formatProps);
+                    if (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+                        std::cout << "Fallback: Using UNORM format for Swapchain to support Storage Image." << std::endl;
+                        return availableFormat;
+                    }
+                }
+            }
+            // 3. その他、とにかくStorage対応のものを探す
+            for (const auto& availableFormat : availableFormats) {
+                VkFormatProperties formatProps;
+                vkGetPhysicalDeviceFormatProperties(physicalDevice, availableFormat.format, &formatProps);
+                if (formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+                    return availableFormat;
+                }
+            }
+        } 
+        // --- パターンB: 通常のグラフィックスパス（Compute書き込み不要）の場合 ---
+        else {
+            // 純粋に標準的なsRGBフォーマットを最優先で選ぶ
+            for (const auto& availableFormat : availableFormats) {
+                if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+                    return availableFormat;
+                }
             }
         }
+
+        // どれも見つからなければ最初のものを返す
         return availableFormats[0];
     }
 

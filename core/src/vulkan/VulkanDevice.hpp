@@ -176,6 +176,8 @@ namespace rhi::vk{
         void createLogicalDevice();
         void createAllocator();
         uint32_t allocateIndex();
+        void setupDebugMessenger();
+        
 
         std::optional<uint32_t> findGraphicsQueueFamilyIndex(VkPhysicalDevice device);
         std::optional<uint32_t> findComputeQueueFamilyIndex(VkPhysicalDevice device);
@@ -190,5 +192,8 @@ namespace rhi::vk{
 
         // タイムラインセマフォ管理
         std::unordered_map<QueueType, std::unique_ptr<VulkanTimelineSemaphore>> m_timelineSemaphores;
+
+        VkDebugUtilsMessengerEXT m_debugMessenger = VK_NULL_HANDLE;
+        bool m_enableValidation = true; // デバッグ用コールバッグ
     };
 }

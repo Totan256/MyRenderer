@@ -49,6 +49,7 @@ namespace core {
         rhi::SwapchainConfig swapchainConfig{};
         swapchainConfig.enableLowLatency = true; // MAILBOX (Fast V-Sync)
         swapchainConfig.desiredBufferCount = 3;  // トリプルバッファリング
+        swapchainConfig.enableComputePresent = true; //computeから直接書き込み
         
         m_impl->swapchain = m_device->createSwapchain(*m_impl->window, swapchainConfig);
         

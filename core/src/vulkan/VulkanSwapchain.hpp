@@ -49,6 +49,8 @@ namespace rhi::vk {
             return reinterpret_cast<SemaphoreHandle>(m_currentPresentSemaphore);
         }
 
+        bool isEnableForCompute() override {return m_config.enableComputePresent;}
+
     private:
         void create(uint32_t width, uint32_t height);
         void cleanup();

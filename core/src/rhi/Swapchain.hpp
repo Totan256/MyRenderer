@@ -25,6 +25,7 @@ public:
     virtual uint32_t getHeight() const = 0;
     virtual bool acquireNextImage() = 0;
     virtual bool present() = 0;
+    virtual bool isEnableForCompute() = 0;
 
     // 現在のフレームにおける描画開始待ち(Acquire)用セマフォハンドルを取得
     virtual SemaphoreHandle getCurrentAcquireSemaphore() const = 0;

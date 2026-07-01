@@ -242,10 +242,8 @@ namespace rhi::vk {
             VkCommandBuffer cmdBuf = vkCmd.getCommandBuffer();
             auto& allocator = static_cast<VulkanRenderGraph&>(m_graph).getAllocator();
 
-            auto& srcReg = m_graph.getRegistration(m_src);
-            bool srcIsImage = srcReg.isImported ? (srcReg.physicalResource && srcReg.physicalResource->isImage()) : srcReg.isImage();
-            auto& dstReg = m_graph.getRegistration(m_dst);
-            bool dstIsImage = dstReg.isImported ? (dstReg.physicalResource && dstReg.physicalResource->isImage()) : dstReg.isImage();
+            bool srcIsImage = m_graph.getRegistration(m_src).isImage();
+            bool dstIsImage = m_graph.getRegistration(m_dst).isImage();
 
             if (srcIsImage && !dstIsImage) {
                 VulkanImage* physSrcImg = allocator.getPhysicalImage(m_src);
@@ -400,8 +398,7 @@ namespace rhi::vk {
     uint32_t VulkanRenderGraph::getPhysicalIndex(ResourceHandle handle) {
         if (handle == InvalidResource || handle >= m_resourceRegistry.size()) return 0;
         const auto& reg = m_resourceRegistry[handle];
-        bool isImg = reg.isImported ? reg.physicalResource->isImage() : reg.isImage();
-        if (isImg) {
+        if (reg.isImage()) {
             VulkanImage* physImg = m_resourceAllocator.getPhysicalImage(handle);
             return physImg ? physImg->getBindlessIndex() : 0;
         } else {
