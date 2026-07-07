@@ -49,16 +49,6 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 // ==========================================
-// UBOデータ取得ヘルパー関数
-// ==========================================
-// vec4 getUniformVec4(uvec2 uboPtr) {
-//     uint uboIdx = uboPtr.x;
-//     uint offsetBytes = uboPtr.y;
-//     // dataはvec4(16バイト)配列なので、バイトオフセットを16で割る
-//     return ubos[nonuniformEXT(uboIdx)].data[offsetBytes / 16];
-// }
-
-// ==========================================
 // Main Execution
 // ==========================================
 void main() {

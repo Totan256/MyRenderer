@@ -16,12 +16,12 @@ public:
 
     void run() {
         std::cout << "--- Loading Model Assets ---" << std::endl;
-        CpuModelData cpuData = ModelImporter::loadFromFile("assets/bunny.obj");
-        auto bunnyModel = ModelBuilder::buildAndEnqueue(getDevice(), getDevice().getUploadManager(), cpuData);
+        CpuModelData cpuData = ModelImporter::loadFromFile("assets/teapot.obj");
+        auto teapotModel = ModelBuilder::buildAndEnqueue(getDevice(), getDevice().getUploadManager(), cpuData);
         
         getDevice().getUploadManager()->submitUploadsAsync();
         getDevice().getUploadManager()->waitUploads();
-        std::cout << "Successfully loaded bunny.obj" << std::endl;
+        std::cout << "Successfully loaded teapot.obj" << std::endl;
         
         auto graph = getDevice().createRenderGraph();
         registerRenderGraph(graph.get());
@@ -29,13 +29,13 @@ public:
         // スワップチェーン画像を登録 (名前ハッシュはShader側のPush Constantsの変数名と完全一致させる)
         auto hSwapchainImg = graph->importSwapchain(getSwapchain(), "swapchainImage"_hash);
         
-        if (bunnyModel) {
-            bunnyModel->importToGraph(*graph);
+        if (teapotModel) {
+            teapotModel->importToGraph(*graph);
         }
 
         uint32_t totalIndices = 0;
-        if (bunnyModel) {
-            for (const auto& sm : bunnyModel->subMeshes) {
+        if (teapotModel) {
+            for (const auto& sm : teapotModel->subMeshes) {
                 totalIndices += sm.indexCount;
             }
         }
@@ -51,10 +51,10 @@ public:
 
         // 1. 各種リソース(インデックス)のバインディング登録
         dispatch.write(hSwapchainImg); // pc.swapchainImage に解決される
-        if (bunnyModel) {
-            dispatch.read(bunnyModel->hPosition)   // pc.ModelPos に解決される
-                    .read(bunnyModel->hAttribute)  // pc.ModelAttr に解決される
-                    .read(bunnyModel->hIndex);      // pc.ModelIdx に解決される
+        if (teapotModel) {
+            dispatch.read(teapotModel->hPosition)   // pc.ModelPos に解決される
+                    .read(teapotModel->hAttribute)  // pc.ModelAttr に解決される
+                    .read(teapotModel->hIndex);      // pc.ModelIdx に解決される
         }
 
         auto profiler = getDevice().createGPUProfiler();
