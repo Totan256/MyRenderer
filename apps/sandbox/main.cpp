@@ -64,6 +64,13 @@ public:
         std::cout << "Start RT Loop" << std::endl;
         
         float time = 3.0f;
+
+        struct SceneGlobals {
+            glm::vec4 camPos_time;
+            glm::vec4 camTarget_numIdx;
+            glm::vec4 resolution_fov;
+        };
+        SceneGlobals globals{};
         
         while (isRunning()) {
             if (!this->beginFrame()) continue;
@@ -73,18 +80,10 @@ public:
             time += getDeltaTime(); // 依存のメンバ変数を使用
 
             // --- 2. 共通パラメータ(UBO)を毎フレーム設定 ---
-            glm::vec4 camPos_time(time);
-            
-            glm::vec4 camTarget_numIndices(0.0f, 0.5f, 0.0f, 0.0f);
-            std::memcpy(&camTarget_numIndices.w, &totalIndices, sizeof(uint32_t));
-            
-            glm::vec4 resolution_fov(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);
-
-            // setUniformを呼ぶと、内部で自動的にUBOプールに書き込まれ、
-            // Push Constantsの該当位置に{インデックス, オフセット}の8バイトがセットされる
-            dispatch.setUniform("camPos_time"_hash, camPos_time)
-                    .setUniform("camTarget_numIdx"_hash, camTarget_numIndices)
-                    .setUniform("resolution_fov"_hash, resolution_fov);
+            globals.camPos_time = glm::vec4(0.0f, 2.0f, 6.0f, time);
+            globals.camTarget_numIdx = glm::vec4(0.0f, 0.5f, 0.0f, 0.0f);
+            globals.resolution_fov = glm::vec4(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);;
+            dispatch.setUniform("sceneGlobalsPtr"_hash, globals);
 
             profiler->resolveResults(getDevice().getCurrentFrame());
             if(profiler->hasNewResults() && getDevice().getCurrentFrame() % 3000 == 0) {

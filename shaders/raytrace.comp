@@ -13,6 +13,12 @@ struct VertexAttributes {
     vec2 padding;
 };
 
+struct SceneGlobals {
+    vec4 camPos_time;
+    vec4 camTarget_numIdx;
+    vec4 resolution_fov;
+};
+
 // ==========================================
 // Bindless Descriptor Sets
 // ==========================================
@@ -27,7 +33,7 @@ layout(set = 0, binding = 1) uniform writeonly image2D storageImages[];
 
 // Binding 2: Uniform Buffers (共通パラメータ用UBO配列)
 layout(set = 0, binding = 2) uniform UniformBuffers {
-    vec4 data[4096]; // 16バイト(vec4)単位のプールとして受ける
+    SceneGlobals globals;
 } ubos[];
 
 // ==========================================
@@ -39,21 +45,18 @@ layout(push_constant) uniform PushConstants {
     uint ModelIdx;
     uint swapchainImage; // C++側で自動解決された最新のバックバッファのインデックスが入る
     
-    // エンジン仕様(index, offset)に合わせた uvec2 型のUBOポインタ
-    uvec2 camPos_time;
-    uvec2 camTarget_numIdx;
-    uvec2 resolution_fov;
+    uvec2 sceneGlobalsPtr;
 } pc;
 
 // ==========================================
 // UBOデータ取得ヘルパー関数
 // ==========================================
-vec4 getUniformVec4(uvec2 uboPtr) {
-    uint uboIdx = uboPtr.x;
-    uint offsetBytes = uboPtr.y;
-    // dataはvec4(16バイト)配列なので、バイトオフセットを16で割る
-    return ubos[nonuniformEXT(uboIdx)].data[offsetBytes / 16];
-}
+// vec4 getUniformVec4(uvec2 uboPtr) {
+//     uint uboIdx = uboPtr.x;
+//     uint offsetBytes = uboPtr.y;
+//     // dataはvec4(16バイト)配列なので、バイトオフセットを16で割る
+//     return ubos[nonuniformEXT(uboIdx)].data[offsetBytes / 16];
+// }
 
 // ==========================================
 // Main Execution
@@ -61,13 +64,15 @@ vec4 getUniformVec4(uvec2 uboPtr) {
 void main() {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 
+    uint uboIdx = pc.sceneGlobalsPtr.x;
+    SceneGlobals globals = ubos[nonuniformEXT(uboIdx)].globals;
+
     // 1. UBOから解像度を安全に取得
-    vec2 resolution = getUniformVec4(pc.resolution_fov).xy;
+    vec2 resolution = globals.resolution_fov.xy;
     if (pixel.x >= resolution.x || pixel.y >= resolution.y) return;
 
     // 2. UBOからカメラ位置・時間を取得
-    vec4 camPos_time = getUniformVec4(pc.camPos_time);
-    float time = camPos_time.w;
+    float time = globals.camPos_time.w;
 
     // 3. ピクセル座標を0.0〜1.0に正規化してUVを作る
     vec2 uv = vec2(pixel) / resolution;
