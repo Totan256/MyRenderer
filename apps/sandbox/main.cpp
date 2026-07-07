@@ -26,14 +26,13 @@ public:
         auto graph = getDevice().createRenderGraph();
         registerRenderGraph(graph.get());
 
-        // スワップチェーン画像を登録
+        // スワップチェーン画像を登録 (名前ハッシュはShader側のPush Constantsの変数名と完全一致させる)
         auto hSwapchainImg = graph->importSwapchain(getSwapchain(), "swapchainImage"_hash);
         
         if (bunnyModel) {
             bunnyModel->importToGraph(*graph);
         }
 
-        // ポリゴン（インデックス）の総数を計算
         uint32_t totalIndices = 0;
         if (bunnyModel) {
             for (const auto& sm : bunnyModel->subMeshes) {
@@ -44,18 +43,18 @@ public:
         // --- コンピュートパスの構築 ---
         auto& pass = graph->addComputePass("RaytracePass", "shaders/raytrace.comp");
         
-        // ウィンドウサイズに追従するようにディスパッチサイズをラムダで動的設定
+        // ディスパッチオブジェクトの参照を保持してループ内で再利用する
         auto& dispatch = pass.dispatchThreads(
             [this](uint32_t& w, uint32_t& h, uint32_t& d) {
                 w = getWidth(); h = getHeight(); d = 1;
             });
 
-        // リソースバインディング
-        dispatch.write(hSwapchainImg); // resolveOffset経由で pc.swapchainImage にインデックスが渡る
+        // 1. 各種リソース(インデックス)のバインディング登録
+        dispatch.write(hSwapchainImg); // pc.swapchainImage に解決される
         if (bunnyModel) {
-            dispatch.read(bunnyModel->hPosition)
-                    .read(bunnyModel->hAttribute)
-                    .read(bunnyModel->hIndex);
+            dispatch.read(bunnyModel->hPosition)   // pc.ModelPos に解決される
+                    .read(bunnyModel->hAttribute)  // pc.ModelAttr に解決される
+                    .read(bunnyModel->hIndex);      // pc.ModelIdx に解決される
         }
 
         auto profiler = getDevice().createGPUProfiler();
@@ -64,23 +63,25 @@ public:
         graph->compile();
         std::cout << "Start RT Loop" << std::endl;
         
-        float time = 0.0f;
+        float time = 3.0f;
         
         while (isRunning()) {
             if (!this->beginFrame()) continue;
+            processEvents();
 
-            // 簡易的な時間更新
-            time += 0.016f;
+            // フレーム時間の更新
+            time += getDeltaTime(); // 依存のメンバ変数を使用
 
-            // --- Push Constants の設定 ---
-            glm::vec4 camPos_time(0.0f, 2.0f, 6.0f, time);
+            // --- 2. 共通パラメータ(UBO)を毎フレーム設定 ---
+            glm::vec4 camPos_time(time);
             
             glm::vec4 camTarget_numIndices(0.0f, 0.5f, 0.0f, 0.0f);
-            // floatのビット列を維持したままuint32_tを詰め込む
             std::memcpy(&camTarget_numIndices.w, &totalIndices, sizeof(uint32_t));
             
             glm::vec4 resolution_fov(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);
 
+            // setUniformを呼ぶと、内部で自動的にUBOプールに書き込まれ、
+            // Push Constantsの該当位置に{インデックス, オフセット}の8バイトがセットされる
             dispatch.setUniform("camPos_time"_hash, camPos_time)
                     .setUniform("camTarget_numIdx"_hash, camTarget_numIndices)
                     .setUniform("resolution_fov"_hash, resolution_fov);
@@ -88,8 +89,10 @@ public:
             profiler->resolveResults(getDevice().getCurrentFrame());
             if(profiler->hasNewResults() && getDevice().getCurrentFrame() % 3000 == 0) {
                 profiler->dumpToConsole();
+                std::cout<<"CPU DeltaTime: "<<getDeltaTime()<<" sec/frame"<<std::endl;
             }
 
+            // 実行 (内部で最新のバックバッファが自動バインドされ、コマンドがサブミットされる)
             graph->execute();
             this->endFrame();
         }

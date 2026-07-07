@@ -321,6 +321,7 @@ namespace rhi::vk{
         indexingFeatures.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
         indexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
         indexingFeatures.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
+        indexingFeatures.shaderUniformBufferArrayNonUniformIndexing = VK_TRUE;
 
         // 有効化するデバイス機能
         VkPhysicalDeviceFeatures deviceFeatures{};

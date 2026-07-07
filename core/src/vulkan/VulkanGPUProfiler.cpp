@@ -92,7 +92,7 @@ namespace rhi::vk {
             return;
         }
         
-        std::cout << "--- Profiling Results (Frame " << m_latestFrame << ") ---" << std::endl;
+        std::cout << "--- GPU Profiling Results (Frame " << m_latestFrame << ") ---" << std::endl;
         for (size_t i = 0; i < m_passNames.size(); ++i) {
             float avg = m_stats[i].totalTime / m_stats[i].count;
             
@@ -101,7 +101,7 @@ namespace rhi::vk {
                     << "    1st Frame: " << m_stats[i].firstFrameTime << " ms\n"
                     << "    Average: " << avg << " ms (" << m_stats[i].count << " frames)" << std::endl;
         }
-        std::cout << "---------------------------------------" << std::endl;
+        std::cout << "-------------------------------------------" << std::endl;
         m_hasNewResults = false;
     }
 }

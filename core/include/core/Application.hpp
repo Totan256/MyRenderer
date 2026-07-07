@@ -76,7 +76,7 @@ private:
     AppMode m_mode;
     bool m_needsRedraw = true;
     float m_deltaTime = 0.0f;
-    uint64_t m_lastTimestamp = 0;
+    double m_lastTimestamp = 0;
 };
 
 } // namespace core
