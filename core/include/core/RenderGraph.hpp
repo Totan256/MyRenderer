@@ -141,6 +141,12 @@ namespace rhi {
             return static_cast<Derived&>(*this);
         }
 
+        template<typename T>
+        Derived& setPushConstant(StringHash nameHash, const T& value) {
+            static_assert(sizeof(T) % 4 == 0, "Push Constants data must be 4-byte aligned");
+            return setPushConstantRaw(nameHash, &value, sizeof(T));
+        }
+
         Derived& read(ResourceHandle handle) {
             uint32_t offset = resolveOffset(handle);
             m_pass.bind(offset, ResourceState::StorageRead);
@@ -167,6 +173,7 @@ namespace rhi {
 
         std::map<uint32_t, ResourceHandle> m_resourceOffsets;
         std::map<uint32_t, std::vector<uint8_t>> m_dynamicUniforms;
+        std::map<uint32_t, std::vector<uint8_t>> m_rawPushConstants;
 
     protected:
         PassT& m_pass;
@@ -178,6 +185,14 @@ namespace rhi {
             auto it = m_pass.getPushConstantOffsets().find(nameHash);
             if (it == m_pass.getPushConstantOffsets().end()) throw std::runtime_error("Uniform not found in shader push constants!");
             auto& vec = m_dynamicUniforms[it->second];
+            vec.resize(size);
+            std::memcpy(vec.data(), data, size);
+            return static_cast<Derived&>(*this);
+        }
+        Derived& setPushConstantRaw(StringHash nameHash, const void* data, size_t size) {
+            auto it = m_pass.getPushConstantOffsets().find(nameHash);
+            if (it == m_pass.getPushConstantOffsets().end()) throw std::runtime_error("PushConstant not found in shader!");
+            auto& vec = m_rawPushConstants[it->second];
             vec.resize(size);
             std::memcpy(vec.data(), data, size);
             return static_cast<Derived&>(*this);

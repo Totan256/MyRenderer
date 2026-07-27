@@ -3,10 +3,13 @@
 #include "rhi/ModelBuilder.hpp"
 #include "rhi/Device.hpp"
 #include "utils/ImageExporter.hpp"
+#include "utils/bvh/BVHManager.hpp"
+#include "utils/bvh/CpuBVHBuilder.hpp"
 #include <iostream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cstring>
+#include <cmath> // fmod
 
 class SandboxApp : public core::Application {
 public:
@@ -19,42 +22,46 @@ public:
         CpuModelData cpuData = ModelImporter::loadFromFile("assets/teapot.obj");
         auto teapotModel = ModelBuilder::buildAndEnqueue(getDevice(), getDevice().getUploadManager(), cpuData);
         
+        std::cout << "--- Building BVH ---" << std::endl;
+        
+        // --- BVHコンフィグ設定
+        // maxDepth, minPrimitives を調整してstats変化確認
+        BVHConfig config;
+        config.maxDepth = 24;
+        config.minPrimitivesPerLeaf = 4;
+        auto builder = std::make_unique<CpuBVHBuilder>(BVHSplitMethod::SpatialMedian, config);
+        
+        auto teapotBvh = BVHManager::buildAndEnqueue(getDevice(), getDevice().getUploadManager(), cpuData, std::move(builder));
+
         getDevice().getUploadManager()->submitUploadsAsync();
         getDevice().getUploadManager()->waitUploads();
-        std::cout << "Successfully loaded teapot.obj" << std::endl;
+        std::cout << "Successfully loaded teapot.obj and BVH" << std::endl;
         
         auto graph = getDevice().createRenderGraph();
         registerRenderGraph(graph.get());
 
-        // スワップチェーン画像を登録 (名前ハッシュはShader側のPush Constantsの変数名と完全一致させる)
         auto hSwapchainImg = graph->importSwapchain(getSwapchain(), "swapchainImage"_hash);
         
         if (teapotModel) {
             teapotModel->importToGraph(*graph);
         }
-
-        uint32_t totalIndices = 0;
-        if (teapotModel) {
-            for (const auto& sm : teapotModel->subMeshes) {
-                totalIndices += sm.indexCount;
-            }
+        if (teapotBvh) {
+            teapotBvh->importToGraph(*graph);
         }
 
-        // --- コンピュートパスの構築 ---
         auto& pass = graph->addComputePass("RaytracePass", "shaders/raytrace.comp");
         
-        // ディスパッチオブジェクトの参照を保持してループ内で再利用する
         auto& dispatch = pass.dispatchThreads(
             [this](uint32_t& w, uint32_t& h, uint32_t& d) {
                 w = getWidth(); h = getHeight(); d = 1;
             });
 
-        // 1. 各種リソース(インデックス)のバインディング登録
-        dispatch.write(hSwapchainImg); // pc.swapchainImage に解決される
-        if (teapotModel) {
-            dispatch.read(teapotModel->hPosition)   // pc.ModelPos に解決される
-                    .read(teapotModel->hAttribute)  // pc.ModelAttr に解決される
-                    .read(teapotModel->hIndex);      // pc.ModelIdx に解決される
+        dispatch.write(hSwapchainImg);
+        if (teapotModel && teapotBvh) {
+            dispatch.read(teapotModel->hPosition)   
+                    .read(teapotModel->hAttribute)  
+                    .read(teapotBvh->hReorderedIndices)
+                    .read(teapotBvh->hNodes);
         }
 
         auto profiler = getDevice().createGPUProfiler();
@@ -76,22 +83,23 @@ public:
             if (!this->beginFrame()) continue;
             processEvents();
 
-            // フレーム時間の更新
-            time += getDeltaTime(); // 依存のメンバ変数を使用
+            time += getDeltaTime();
 
-            // --- 2. 共通パラメータ(UBO)を毎フレーム設定 ---
-            globals.camPos_time = glm::vec4(0.0f, 2.0f, 6.0f, time);
+            globals.camPos_time = glm::vec4(0.0f, 2.0f, 8.0f, time);
             globals.camTarget_numIdx = glm::vec4(0.0f, 0.5f, 0.0f, 0.0f);
-            globals.resolution_fov = glm::vec4(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);;
+            globals.resolution_fov = glm::vec4(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);
             dispatch.setUniform("sceneGlobalsPtr"_hash, globals);
+
+            // 4秒ごとに Normal / Heatmap 切り替え
+            uint32_t renderMode = (std::fmod(time, 4.0f) > 2.0f) ? 1 : 0;
+            dispatch.setPushConstant("renderMode"_hash, renderMode);
 
             profiler->resolveResults(getDevice().getCurrentFrame());
             if(profiler->hasNewResults() && getDevice().getCurrentFrame() % 3000 == 0) {
                 profiler->dumpToConsole();
-                std::cout<<"CPU DeltaTime: "<<getDeltaTime()<<" sec/frame"<<std::endl;
+                std::cout<<"CPU DeltaTime: "<<getDeltaTime()*1000 <<" ms/frame"<<std::endl;
             }
 
-            // 実行 (内部で最新のバックバッファが自動バインドされ、コマンドがサブミットされる)
             graph->execute();
             this->endFrame();
         }

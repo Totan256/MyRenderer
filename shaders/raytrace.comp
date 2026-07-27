@@ -1,84 +1,127 @@
 #version 460
 #extension GL_EXT_nonuniform_qualifier : require
+#extension GL_GOOGLE_include_directive : require
 
-// 8x8 = 64スレッドのワークグループ
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-struct VertexPosition {
-    vec4 position;
-};
-struct VertexAttributes {
-    vec4 normal;
-    vec2 uv;
-    vec2 padding;
-};
-
-struct SceneGlobals {
-    vec4 camPos_time;
-    vec4 camTarget_numIdx;
-    vec4 resolution_fov;
-};
+#include "raytrace_types.glsl"
+#include "raytrace_math.glsl"
 
 // ==========================================
 // Bindless Descriptor Sets
 // ==========================================
-
-// Binding 0: Storage Buffers (構造体の異なるSSBO配列を同じbindingにエイリアシング)
 layout(set = 0, binding = 0) readonly buffer PositionBuffers  { VertexPosition data[]; } positionBuffers[];
 layout(set = 0, binding = 0) readonly buffer AttributeBuffers { VertexAttributes data[]; } attributeBuffers[];
 layout(set = 0, binding = 0) readonly buffer IndexBuffers     { uint data[]; } indexBuffers[];
+layout(set = 0, binding = 0) readonly buffer BvhNodeBuffers   { BVHNode data[]; } bvhNodeBuffers[];
 
-// Binding 1: Storage Images (出力先スワップチェーン)
 layout(set = 0, binding = 1) uniform writeonly image2D storageImages[];
-
-// Binding 2: Uniform Buffers (共通パラメータ用UBO配列)
-layout(set = 0, binding = 2) uniform UniformBuffers {
-    SceneGlobals globals;
-} ubos[];
+layout(set = 0, binding = 2) uniform UniformBuffers { SceneGlobals globals; } ubos[];
 
 // ==========================================
-// Push Constants (インデックスとUBOポインタ情報のみ)
+// Push Constants
 // ==========================================
 layout(push_constant) uniform PushConstants {
     uint ModelPos;
     uint ModelAttr;
     uint ModelIdx;
-    uint swapchainImage; // C++側で自動解決された最新のバックバッファのインデックスが入る
-    
+    uint ModelBvhNodes;
+    uint swapchainImage;
     uvec2 sceneGlobalsPtr;
+    uint renderMode; // 0 = Normal, 1 = BVH Traversal Heatmap
 } pc;
 
-// ==========================================
-// Main Execution
-// ==========================================
 void main() {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-
     uint uboIdx = pc.sceneGlobalsPtr.x;
     SceneGlobals globals = ubos[nonuniformEXT(uboIdx)].globals;
-
-    // 1. UBOから解像度を安全に取得
     vec2 resolution = globals.resolution_fov.xy;
+
     if (pixel.x >= resolution.x || pixel.y >= resolution.y) return;
 
-    // 2. UBOからカメラ位置・時間を取得
-    float time = globals.camPos_time.w;
+    vec2 uv = (vec2(pixel) / resolution) * 2.0 - 1.0;
+    uv.y = -uv.y;
+    float fov = globals.resolution_fov.z;
+    float aspect = resolution.x / resolution.y;
 
-    // 3. ピクセル座標を0.0〜1.0に正規化してUVを作る
-    vec2 uv = vec2(pixel) / resolution;
+    vec3 ro = globals.camPos_time.xyz;
+    vec3 target = globals.camTarget_numIdx.xyz;
+    vec3 forward = normalize(target - ro);
+    vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+    vec3 up = cross(right, forward);
 
-    // 4. UV座標と時間を使ってグラデーションを作る
-    // X軸で赤、Y軸で緑、時間経過で青が変化するグラデーション
-    vec3 color = vec3(uv.x, uv.y+abs(cos(time)), abs(sin(time)));
+    vec3 rd = normalize(forward + right * uv.x * aspect * tan(fov/2.0) + up * uv.y * tan(fov/2.0));
 
-    // 5. (おまけ) SSBOへのアクセス確認
-    // モデルが正しく読み込めていれば、画面全体を少し明るくする
-    uint vertexId = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[0];
-    vec3 testPos = positionBuffers[nonuniformEXT(pc.ModelPos)].data[vertexId].position.xyz;
-    if (length(testPos) > 0.0) {
-        color += vec3(0.1); 
+    // 0除算対策
+    vec3 safeRd = rd;
+    if (abs(safeRd.x) < 1e-8) safeRd.x = 1e-8;
+    if (abs(safeRd.y) < 1e-8) safeRd.y = 1e-8;
+    if (abs(safeRd.z) < 1e-8) safeRd.z = 1e-8;
+    vec3 invRd = 1.0 / safeRd;
+
+    uint stack[64];
+    int stackPtr = 0;
+    stack[stackPtr++] = 0; 
+
+    float closestT = 10000.0;
+    vec3 hitNormal = vec3(0.0);
+    bool hit = false;
+
+    int traversalCount = 0; // ヒートマップ用のカウンタ
+
+    while (stackPtr > 0) {
+        traversalCount++; // 探索回数をカウント
+        uint nodeIdx = stack[--stackPtr];
+        BVHNode node = bvhNodeBuffers[nonuniformEXT(pc.ModelBvhNodes)].data[nodeIdx];
+        
+        float tMin;
+        if (!intersectAABB(ro, invRd, node.aabbMin, node.aabbMax, tMin) || tMin > closestT) {
+            continue;
+        }
+
+        if (node.rightChildOrPrimitiveCount > 0) { 
+            uint primOffset = node.leftChildOrPrimitiveOffset;
+            uint primCount = node.rightChildOrPrimitiveCount;
+            
+            for (uint i = 0; i < primCount; i++) {
+                uint baseIdx = (primOffset + i) * 3;
+                
+                uint i0 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 0];
+                uint i1 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 1];
+                uint i2 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 2];
+                
+                vec3 v0 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i0].position.xyz;
+                vec3 v1 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i1].position.xyz;
+                vec3 v2 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i2].position.xyz;
+                
+                float t; vec2 bary;
+                if (intersectTriangle(ro, rd, v0, v1, v2, t, bary)) {
+                    if (t < closestT) {
+                        closestT = t;
+                        hit = true;
+                        hitNormal = normalize(cross(v1 - v0, v2 - v0));
+                    }
+                }
+            }
+        } else {
+            stack[stackPtr++] = node.leftChildOrPrimitiveOffset + 1;
+            stack[stackPtr++] = node.leftChildOrPrimitiveOffset;
+        }
     }
 
-    // 6. スワップチェーン画像への書き込み
+    // --- 描画モードの分岐 ---
+    vec3 color = vec3(0.1, 0.1, 0.15); // 背景色
+    if (pc.renderMode == 1) {
+        // ヒートマップモード (最大探索回数はおおよそ100〜200を想定)
+        color = getHeatmapColor(traversalCount, 150);
+    } else {
+        // 通常モード
+        if (hit) {
+            color = hitNormal * 0.5 + 0.5;
+        }
+    }
+
     imageStore(storageImages[nonuniformEXT(pc.swapchainImage)], pixel, vec4(color, 1.0));
+
+
 }

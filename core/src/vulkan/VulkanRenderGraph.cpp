@@ -74,7 +74,8 @@ namespace rhi::vk {
             rhi::vk::VulkanRenderGraph& graph,
             rhi::vk::VulkanDevice& device,
             const std::map<uint32_t, rhi::ResourceHandle>& resourceOffsets,
-            const std::map<uint32_t, std::vector<uint8_t>>& dynamicUniforms)
+            const std::map<uint32_t, std::vector<uint8_t>>& dynamicUniforms,
+            const std::map<uint32_t, std::vector<uint8_t>>& rawPushConstants)
         {
             PushConstantPack pack{};
             
@@ -91,6 +92,12 @@ namespace rhi::vk {
                     std::memcpy(pack.data.data() + offset, &allocation.index, 4);
                     std::memcpy(pack.data.data() + offset + 4, &allocation.offset, 4);
                     pack.size = std::max(pack.size, (uint32_t)(offset + 8));
+                }
+            }
+            for (auto const& [offset, dataVec] : rawPushConstants) {
+                if (offset + dataVec.size() <= MAX_PUSH_CONSTANT_SIZE) {
+                    std::memcpy(pack.data.data() + offset, dataVec.data(), dataVec.size());
+                    pack.size = std::max(pack.size, (uint32_t)(offset + dataVec.size()));
                 }
             }
             return pack;
@@ -127,7 +134,7 @@ namespace rhi::vk {
             auto& vkDevice = static_cast<VulkanDevice&>(m_graph.getDevice());
             auto& vkGraph = static_cast<VulkanRenderGraph&>(m_graph);
             for (auto& state : m_dispatches) {
-                auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms);
+                auto pack = BuildPushConstants(vkGraph, vkDevice, state.m_resourceOffsets, state.m_dynamicUniforms, state.m_rawPushConstants);
                 if (pack.size > 0) vkCmd.setPushData(0, pack.size, pack.data.data());
                 // 動的にディスパッチサイズを評価
                 uint32_t dispatchX, dispatchY, dispatchZ;
@@ -209,7 +216,7 @@ namespace rhi::vk {
                 auto& vkDevice = static_cast<VulkanDevice&>(m_graph.getDevice());
                 auto& vkGraph = static_cast<VulkanRenderGraph&>(m_graph);
                 for (auto& draw : m_draws) {
-                    auto pack = BuildPushConstants(vkGraph, vkDevice, draw.m_resourceOffsets, draw.m_dynamicUniforms);
+                    auto pack = BuildPushConstants(vkGraph, vkDevice, draw.m_resourceOffsets, draw.m_dynamicUniforms, draw.m_rawPushConstants);
                     if (pack.size > 0) {
                         vkCmdPushConstants(cmdBuf, m_pipeline->getPipelineLayout(), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, pack.size, pack.data.data());
                     }

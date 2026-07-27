@@ -16,7 +16,7 @@ struct GpuModel {
 
     // グラフに自分の中身を一括インポートするヘルパー関数
     void importToGraph(rhi::RenderGraph& graph) {
-        // ※StringHashはモデルのID等でユニークにするとなお良し
+        
         hPosition = graph.importResource(positionBuffer.get(), "ModelPos"_hash);
         hAttribute = graph.importResource(attributeBuffer.get(), "ModelAttr"_hash);
         hIndex = graph.importResource(indexBuffer.get(), "ModelIdx"_hash);
