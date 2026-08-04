@@ -61,7 +61,7 @@ public:
     rhi::Device& getDevice() { return *m_device; }
     rhi::Swapchain* getSwapchain();
 
-    float getDeltaTime() const { return m_deltaTime; }
+    float getDeltaTimeSeconds() const { return m_deltaTime; }
     uint32_t getWidth() const;
     uint32_t getHeight() const;
 

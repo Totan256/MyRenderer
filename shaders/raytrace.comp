@@ -45,6 +45,7 @@ void main() {
     float aspect = resolution.x / resolution.y;
 
     vec3 ro = globals.camPos_time.xyz;
+    ro.xz *= mat2(cos(globals.camPos_time.w), -sin(globals.camPos_time.w), sin(globals.camPos_time.w), cos(globals.camPos_time.w));
     vec3 target = globals.camTarget_numIdx.xyz;
     vec3 forward = normalize(target - ro);
     vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));

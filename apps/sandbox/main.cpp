@@ -83,7 +83,7 @@ public:
             if (!this->beginFrame()) continue;
             processEvents();
 
-            time += getDeltaTime();
+            time += getDeltaTimeSeconds();
 
             globals.camPos_time = glm::vec4(0.0f, 2.0f, 8.0f, time);
             globals.camTarget_numIdx = glm::vec4(0.0f, 0.5f, 0.0f, 0.0f);
@@ -97,7 +97,7 @@ public:
             profiler->resolveResults(getDevice().getCurrentFrame());
             if(profiler->hasNewResults() && getDevice().getCurrentFrame() % 3000 == 0) {
                 profiler->dumpToConsole();
-                std::cout<<"CPU DeltaTime: "<<getDeltaTime()*1000 <<" ms/frame"<<std::endl;
+                std::cout<<"CPU DeltaTime: "<<getDeltaTimeSeconds()*1000 <<" ms/frame, FPS: "<<1.0f/getDeltaTimeSeconds()<<std::endl;
             }
 
             graph->execute();
