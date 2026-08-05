@@ -54,3 +54,5 @@ workspace/*
 # CMakeUserPresets
 CMakeUserPresets.json
 
+# 
+.zip
