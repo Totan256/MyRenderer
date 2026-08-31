@@ -1,0 +1,296 @@
+#version 460
+#extension GL_EXT_nonuniform_qualifier : require
+// #extension GL_GOOGLE_include_directive : require
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// ==========================================
+// Scene Definitions (ここで位置や色を調整できます)
+// ==========================================
+/* STREAMING_CHUNK:Defining scene constants... */
+#define FLOOR_HEIGHT 0.0
+#define LIGHT_POS vec3(5.0, 10.0, 5.0)
+#define LIGHT_COLOR vec3(1.0, 0.9, 0.8)
+#define MAX_BOUNCES 3
+
+// ==========================================
+// Data Structures
+// ==========================================
+/* STREAMING_CHUNK:Defining data structures... */
+struct VertexPosition { vec4 position; };
+struct VertexAttributes { vec4 normal; vec2 uv; vec2 padding; };
+
+struct SceneGlobals {
+vec4 camPos_time;
+vec4 camTarget_numIdx;
+vec4 resolution_fov;
+};
+
+struct BVHNode {
+vec3 aabbMin;
+uint leftChildOrPrimitiveOffset;
+vec3 aabbMax;
+uint rightChildOrPrimitiveCount;
+};
+
+// レイトレーシングでの交差結果を格納する構造体
+struct HitRecord {
+float t;
+vec3 normal;
+int matType; // 0: None(背景), 1: Model(BVH), 2: Floor(床)
+};
+
+// ==========================================
+// Bindless Descriptor Sets
+// ==========================================
+/* STREAMING_CHUNK:Binding descriptor sets... */
+layout(set = 0, binding = 0) readonly buffer PositionBuffers  { VertexPosition data[]; } positionBuffers[];
+layout(set = 0, binding = 0) readonly buffer AttributeBuffers { VertexAttributes data[]; } attributeBuffers[];
+layout(set = 0, binding = 0) readonly buffer IndexBuffers     { uint data[]; } indexBuffers[];
+layout(set = 0, binding = 0) readonly buffer BvhNodeBuffers   { BVHNode data[]; } bvhNodeBuffers[];
+
+layout(set = 0, binding = 1) uniform writeonly image2D storageImages[];
+layout(set = 0, binding = 2) uniform UniformBuffers { SceneGlobals globals; } ubos[];
+
+// ==========================================
+// Push Constants
+// ==========================================
+layout(push_constant) uniform PushConstants {
+uint ModelPos;
+uint ModelAttr;
+uint ModelIdx;
+uint ModelBvhNodes;
+uint swapchainImage;
+uvec2 sceneGlobalsPtr;
+uint renderMode; // 0 = Normal, 1 = BVH Traversal Heatmap
+} pc;
+
+// ==========================================
+// Intersection Math
+// ==========================================
+/* STREAMING_CHUNK:Implementing intersection math... */
+bool intersectAABB(vec3 ro, vec3 invRd, vec3 aabbMin, vec3 aabbMax, out float tMin) {
+vec3 t0 = (aabbMin - ro) * invRd;
+vec3 t1 = (aabbMax - ro) * invRd;
+vec3 tmin = min(t0, t1);
+vec3 tmax = max(t0, t1);
+tMin = max(max(tmin.x, tmin.y), tmin.z);
+float tMax = min(min(tmax.x, tmax.y), tmax.z);
+return tMax >= tMin && tMax > 0.0;
+}
+
+bool intersectTriangle(vec3 ro, vec3 rd, vec3 v0, vec3 v1, vec3 v2, out float t, out vec2 bary) {
+vec3 edge1 = v1 - v0;
+vec3 edge2 = v2 - v0;
+vec3 h = cross(rd, edge2);
+float a = dot(edge1, h);
+if (a > -0.0001 && a < 0.0001) return false;
+float f = 1.0 / a;
+vec3 s = ro - v0;
+bary.x = f * dot(s, h);
+if (bary.x < 0.0 || bary.x > 1.0) return false;
+vec3 q = cross(s, edge1);
+bary.y = f * dot(rd, q);
+if (bary.y < 0.0 || bary.x + bary.y > 1.0) return false;
+t = f * dot(edge2, q);
+return t > 0.0001;
+}
+
+// ヒートマップの色変換
+vec3 getHeatmapColor(int count, int maxCount) {
+float heat = clamp(float(count) / float(maxCount), 0.0, 1.0);
+if (heat < 0.5) {
+return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), heat * 2.0);
+} else {
+return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (heat - 0.5) * 2.0);
+}
+}
+
+// ==========================================
+// Scene Traversal
+// ==========================================
+/* STREAMING_CHUNK:Implementing scene traversal function... */
+// シーン全体（床 ＋ BVHモデル）との交差判定を行う関数
+void intersectScene(vec3 ro, vec3 rd, out HitRecord rec, inout int traversalCount) {
+rec.t = 10000.0;
+rec.matType = 0;
+rec.normal = vec3(0.0);
+
+// 1. 床との交差判定 (無限に広がる平面)
+if (abs(rd.y) > 1e-6) {
+    float tFloor = (FLOOR_HEIGHT - ro.y) / rd.y;
+    if (tFloor > 0.001 && tFloor < rec.t) {
+        rec.t = tFloor;
+        // 表裏を考慮した法線
+        rec.normal = rd.y < 0.0 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, -1.0, 0.0);
+        rec.matType = 2; // Floor
+    }
+}
+
+// 2. モデル(BVH)との交差判定
+vec3 safeRd = rd;
+if (abs(safeRd.x) < 1e-8) safeRd.x = 1e-8;
+if (abs(safeRd.y) < 1e-8) safeRd.y = 1e-8;
+if (abs(safeRd.z) < 1e-8) safeRd.z = 1e-8;
+vec3 invRd = 1.0 / safeRd;
+
+uint stack[64];
+int stackPtr = 0;
+stack[stackPtr++] = 0; 
+
+while (stackPtr > 0) {
+    traversalCount++;
+    uint nodeIdx = stack[--stackPtr];
+    BVHNode node = bvhNodeBuffers[nonuniformEXT(pc.ModelBvhNodes)].data[nodeIdx];
+    
+    float tMin;
+    if (!intersectAABB(ro, invRd, node.aabbMin, node.aabbMax, tMin) || tMin > rec.t) {
+        continue; // 現在見つかっている最近傍の距離(rec.t)より遠ければスキップ
+    }
+
+    if (node.rightChildOrPrimitiveCount > 0) { 
+        uint primOffset = node.leftChildOrPrimitiveOffset;
+        uint primCount = node.rightChildOrPrimitiveCount;
+        
+        for (uint i = 0; i < primCount; i++) {
+            uint baseIdx = (primOffset + i) * 3;
+            
+            uint i0 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 0];
+            uint i1 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 1];
+            uint i2 = indexBuffers[nonuniformEXT(pc.ModelIdx)].data[baseIdx + 2];
+            
+            vec3 v0 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i0].position.xyz;
+            vec3 v1 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i1].position.xyz;
+            vec3 v2 = positionBuffers[nonuniformEXT(pc.ModelPos)].data[i2].position.xyz;
+            
+            float tPrim; vec2 bary;
+            if (intersectTriangle(ro, rd, v0, v1, v2, tPrim, bary)) {
+                if (tPrim < rec.t) {
+                    rec.t = tPrim;
+                    rec.matType = 1; // Model
+                    rec.normal = normalize(cross(v1 - v0, v2 - v0));
+                }
+            }
+        }
+    } else {
+        stack[stackPtr++] = node.leftChildOrPrimitiveOffset + 1;
+        stack[stackPtr++] = node.leftChildOrPrimitiveOffset;
+    }
+}
+
+
+}
+
+// ==========================================
+// Main Function
+// ==========================================
+/* STREAMING_CHUNK:Implementing main raytracing loop... */
+void main() {
+ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+uint uboIdx = pc.sceneGlobalsPtr.x;
+SceneGlobals globals = ubos[nonuniformEXT(uboIdx)].globals;
+vec2 resolution = globals.resolution_fov.xy;
+
+if (pixel.x >= resolution.x || pixel.y >= resolution.y) return;
+
+vec2 uv = (vec2(pixel) / resolution) * 2.0 - 1.0;
+uv.y = -uv.y;
+float fov = globals.resolution_fov.z;
+float aspect = resolution.x / resolution.y;
+
+// カメラ設定
+vec3 ro = globals.camPos_time.xyz;
+ro.xz *= mat2(cos(globals.camPos_time.w), -sin(globals.camPos_time.w), sin(globals.camPos_time.w), cos(globals.camPos_time.w));
+vec3 target = globals.camTarget_numIdx.xyz;
+vec3 forward = normalize(target - ro);
+vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+vec3 up = cross(right, forward);
+
+vec3 rd = normalize(forward + right * uv.x * aspect * tan(fov/2.0) + up * uv.y * tan(fov/2.0));
+
+// パストレーシング/レイトレーシング用変数
+vec3 finalColor = vec3(0.0);
+vec3 throughput = vec3(1.0); // 反射するたびに減衰する光の量
+int totalTraversalCount = 0;
+
+// 反射（バウンス）ループ
+for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+    HitRecord rec;
+    int travCount = 0;
+    
+    intersectScene(ro, rd, rec, travCount);
+    totalTraversalCount += travCount;
+
+    // 何も当たらなかった場合 (背景)
+    if (rec.matType == 0) {
+        finalColor += throughput * vec3(0.1, 0.1, 0.15); // 背景色
+        break;
+    }
+
+    // ヒット位置と法線
+    vec3 hitPoint = ro + rd * rec.t;
+    vec3 normal = rec.normal;
+    
+    // --- 影の計算 (Shadow Ray) ---
+    vec3 lightDir = normalize(LIGHT_POS - hitPoint);
+    float distToLight = length(LIGHT_POS - hitPoint);
+    
+    HitRecord shadowRec;
+    int shadowTravCount = 0;
+    // シャドウレイは自己交差を避けるために法線方向に少し(0.001)浮かせて飛ばす
+    intersectScene(hitPoint + normal * 0.001, lightDir, shadowRec, shadowTravCount);
+    totalTraversalCount += shadowTravCount;
+
+    float shadow = 1.0; // 1.0 = 光が当たる, 小さい値 = 影
+    if (shadowRec.matType != 0 && shadowRec.t < distToLight) {
+        shadow = 0.1; // 影の中 (真っ黒を避けるために環境光として0.1を残す)
+    }
+
+    // --- マテリアルごとのライティング処理 ---
+    if (rec.matType == 1) { 
+        // 1. モデル (Diffuse)
+        float diff = max(dot(normal, lightDir), 0.0);
+        
+        // 法線を色として使う (既存の表現を踏襲)
+        vec3 diffuseColor = normal * 0.5 + 0.5; 
+        
+        // ライティング結果を加算。モデルは反射させないのでここで break する
+        finalColor += throughput * (diffuseColor * diff * LIGHT_COLOR * shadow + diffuseColor * 0.1); 
+        break; 
+        
+    } else if (rec.matType == 2) { 
+        // 2. 床 (Mirror + Checkerboard)
+        // 床が分かりやすいように格子模様(チェッカー)にする
+        float checker = mod(floor(hitPoint.x * 2.0) + floor(hitPoint.z * 2.0), 2.0);
+        vec3 floorBaseColor = mix(vec3(0.3), vec3(0.7), checker);
+        
+        // シャドウを考慮した弱いディフューズ光を加算
+        float diff = max(dot(normal, lightDir), 0.0);
+        finalColor += throughput * (floorBaseColor * diff * LIGHT_COLOR * shadow * 0.1);
+
+        // レイを反射方向に設定し、次のループへ
+        ro = hitPoint + normal * 0.001; // 自己交差防止のオフセット
+        rd = reflect(rd, normal);
+        
+        // 床の反射率をスループットに乗算 (色も少し反映される)
+        throughput *= floorBaseColor * 0.8; 
+    }
+}
+
+// --- 描画モードの分岐 ---
+vec3 outputColor;
+if (pc.renderMode == 1) {
+    // ヒートマップモード (反射が増えた分、最大検索回数の想定を引き上げ)
+    outputColor = getHeatmapColor(totalTraversalCount, 150 * MAX_BOUNCES);
+} else {
+    // 通常モード
+    outputColor = finalColor;
+}
+
+// ガンマ補正をかけて出力 (より自然なグラデーションと明るさのため)
+outputColor = pow(outputColor, vec3(1.0 / 2.2));
+
+imageStore(storageImages[nonuniformEXT(pc.swapchainImage)], pixel, vec4(outputColor, 1.0));
+
+
+}

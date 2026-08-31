@@ -49,7 +49,7 @@ public:
             teapotBvh->importToGraph(*graph);
         }
 
-        auto& pass = graph->addComputePass("RaytracePass", "shaders/raytrace.comp");
+        auto& pass = graph->addComputePass("RaytracePass", "shaders/raytrace2.comp");
         
         auto& dispatch = pass.dispatchThreads(
             [this](uint32_t& w, uint32_t& h, uint32_t& d) {
@@ -83,15 +83,15 @@ public:
             if (!this->beginFrame()) continue;
             processEvents();
 
-            time += getDeltaTimeSeconds();
+            // time += getDeltaTimeSeconds();
 
-            globals.camPos_time = glm::vec4(0.0f, 2.0f, 8.0f, time);
+            globals.camPos_time = glm::vec4(0.0f, 4.0f, 8.0f, time);
             globals.camTarget_numIdx = glm::vec4(0.0f, 0.5f, 0.0f, 0.0f);
             globals.resolution_fov = glm::vec4(getWidth(), getHeight(), glm::radians(45.0f), 0.0f);
             dispatch.setUniform("sceneGlobalsPtr"_hash, globals);
 
             // 4秒ごとに Normal / Heatmap 切り替え
-            uint32_t renderMode = (std::fmod(time, 4.0f) > 2.0f) ? 1 : 0;
+            uint32_t renderMode = 0;
             dispatch.setPushConstant("renderMode"_hash, renderMode);
 
             profiler->resolveResults(getDevice().getCurrentFrame());
