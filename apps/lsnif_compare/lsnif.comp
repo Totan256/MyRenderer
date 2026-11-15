@@ -1,0 +1,164 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "scene.glsl"
+layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
+layout(set=0,binding=0) readonly buffer Floats { float data[]; } weights[];
+layout(set=0,binding=0) readonly buffer Words { uint data[]; } occupancy[];
+layout(push_constant) uniform Push {
+    uint swapchainImage;
+    uint Weights;
+    uint Occupancy;
+    uvec2 sceneGlobalsPtr;
+} pc;
+
+float weightAt(uint offset) { return weights[nonuniformEXT(pc.Weights)].data[offset]; }
+bool occupied(ivec3 cell, uint V) {
+    uint i=uint(cell.x)+V*(uint(cell.y)+V*uint(cell.z));
+    return (occupancy[nonuniformEXT(pc.Occupancy)].data[i>>5] & (1u<<(i&31u)))!=0u;
+}
+
+bool rayBox(vec3 o,vec3 d,Scene s,out float t0,out float t1) {
+    t0=s.infer.z; t1=s.infer.w;
+    for(int a=0;a<3;++a) {
+        if(abs(d[a])<=s.eps.x) {
+            if(o[a]<s.boxMin[a] || o[a]>s.boxMax[a]) return false;
+        } else {
+            float near=(s.boxMin[a]-o[a])/d[a], far=(s.boxMax[a]-o[a])/d[a];
+            t0=max(t0,min(near,far)); t1=min(t1,max(near,far));
+        }
+    }
+    return t1>=t0;
+}
+
+// Cell-face positions are snapped to exact normalized grid coordinates.
+vec3 pointAt(vec3 o,vec3 d,float t,Scene s) {
+    vec3 q=clamp((o+d*t-s.boxMin.xyz)/(s.boxMax.xyz-s.boxMin.xyz),0.0,1.0);
+    float V=float(s.dims.x);
+    for(int a=0;a<3;++a) {
+        float k=round(q[a]*V);
+        if(abs(q[a]*V-k)<=max(s.eps.w*V,0.00002)) q[a]=k/V;
+    }
+    return q;
+}
+void appendPoint(vec3 o,vec3 d,float t,Scene s,inout int count,inout float previous,inout vec3 points[18]) {
+    if(count==18 || (count>0 && (t<=previous || t-previous<=s.eps.z))) return;
+    points[count++]=pointAt(o,d,t,s);
+    previous=t;
+}
+int generatePoints(vec3 o,vec3 d,Scene s,float start,float end,out vec3 points[18]) {
+    int count=0;
+    float previous=-3.402823e38;
+    uint V=s.dims.x;
+    vec3 extent=s.boxMax.xyz-s.boxMin.xyz;
+    vec3 q=(o+d*start-s.boxMin.xyz)/extent*float(V);
+    ivec3 cell, stepDir;
+    vec3 nextT;
+    for(int a=0;a<3;++a) {
+        stepDir[a]=d[a]>0.0?1:(d[a]<0.0?-1:0);
+        float rounded=round(q[a]);
+        float pos=abs(q[a]-rounded)<0.00002 ? rounded : floor(q[a]);
+        cell[a]=int(pos) - (stepDir[a]<0 && abs(q[a]-rounded)<0.00002 ? 1:0);
+        cell[a]=clamp(cell[a],0,int(V)-1);
+        if(stepDir[a]==0) nextT[a]=3.402823e38;
+        else {
+            int face=cell[a]+(stepDir[a]>0?1:0);
+            nextT[a]=(s.boxMin[a]+extent[a]*float(face)/float(V)-o[a])/d[a];
+        }
+    }
+    float entry=start;
+    for(uint iteration=0u;iteration<3u*V+3u;++iteration) {
+        if(any(lessThan(cell,ivec3(0))) || any(greaterThanEqual(cell,ivec3(int(V)))) || entry>end) break;
+        float boundary=min(nextT.x,min(nextT.y,nextT.z));
+        float leave=min(end,boundary);
+        if(occupied(cell,V)) {
+            appendPoint(o,d,entry,s,count,previous,points);
+            appendPoint(o,d,leave,s,count,previous,points);
+            if(count==18) break;
+        }
+        if(boundary>=end) break;
+        float tolerance=s.eps.y*max(1.0,abs(boundary));
+        for(int a=0;a<3;++a) {
+            if(abs(nextT[a]-boundary)<=tolerance) {
+                cell[a]+=stepDir[a];
+                if(stepDir[a]!=0) {
+                    int face=cell[a]+(stepDir[a]>0?1:0);
+                    nextT[a]=(s.boxMin[a]+extent[a]*float(face)/float(V)-o[a])/d[a];
+                }
+            }
+        }
+        entry=boundary;
+    }
+    return count;
+}
+
+uint hashVertex(ivec3 p,Scene s) {
+    return (uint(p.x)*s.levels.z ^ uint(p.y)*s.levels.w ^ uint(p.z)*s.widths.x) & (s.dims.z-1u);
+}
+void encodePoint(vec3 q,Scene s,int level,out vec3 feature) {
+    float V=float(s.dims.x);
+    vec3 coarse=q*V;
+    int axis=-1;
+    for(int a=0;a<3;++a) if(abs(coarse[a]-round(coarse[a]))<=s.eps.w) {
+        if(axis<0) axis=a;
+        q[a]=round(coarse[a])/V;
+    }
+    if(axis<0) { feature=vec3(0); return; } // A diagnostic mismatch if reached.
+    uint R=level==0?s.levels.x:s.levels.y;
+    vec3 scaled=q*float(R);
+    ivec3 base;
+    for(int a=0;a<3;++a) base[a]=a==axis?int(round(scaled[a])):clamp(int(floor(scaled[a])),0,int(R)-1);
+    int a=(axis+1)%3, b=(axis+2)%3;
+    float u=scaled[a]-float(base[a]), v=scaled[b]-float(base[b]);
+    uint offset=level==0?s.offsets0.x:s.offsets0.y;
+    feature=vec3(0);
+    for(int j=0;j<2;++j) for(int i=0;i<2;++i) {
+        ivec3 vertex=base; vertex[a]+=i; vertex[b]+=j;
+        uint address=offset+hashVertex(vertex,s)*3u;
+        float factor=(i==0?1.0-u:u)*(j==0?1.0-v:v);
+        feature+=factor*vec3(weightAt(address),weightAt(address+1u),weightAt(address+2u));
+    }
+}
+float sigmoid(float x) { return 1.0/(1.0+exp(-x)); }
+void main() {
+    ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
+    Scene s=scenes[nonuniformEXT(pc.sceneGlobalsPtr.x)].data;
+    int halfWidth=(int(s.resolutionFov.x)+1)/2;
+    if(pixel.x>=halfWidth || pixel.y>=int(s.resolutionFov.y)) return;
+    vec3 o,d; makeRay(pixel,s,o,d);
+    float nearT,farT;
+    vec3 color=background;
+    if(rayBox(o,d,s,nearT,farT)) {
+        vec3 points[18];
+        int count=generatePoints(o,d,s,nearT,farT,points);
+        // Invalid points have exactly zero features, but even an empty ray runs the MLP.
+        float encoded[108];
+        for(int i=0;i<108;++i) encoded[i]=0.0;
+        for(int p=0;p<count;++p) for(int level=0;level<2;++level) {
+            vec3 f; encodePoint(points[p],s,level,f);
+            for(int c=0;c<3;++c) encoded[(p*2+level)*3+c]=f[c];
+        }
+        float h0[128],h1[128];
+        for(uint row=0;row<s.widths.y;++row) {
+            float x=weightAt(s.offsets0.w+row);
+            for(uint col=0;col<108u;++col) x+=weightAt(s.offsets0.z+row*108u+col)*encoded[col];
+            h0[row]=max(x,s.infer.x*x);
+        }
+        for(uint row=0;row<s.widths.z;++row) {
+            float x=weightAt(s.offsets1.y+row);
+            for(uint col=0;col<s.widths.y;++col) x+=weightAt(s.offsets1.x+row*s.widths.y+col)*h0[col];
+            h1[row]=max(x,s.infer.x*x);
+        }
+        float raw[8];
+        for(uint row=0;row<8u;++row) {
+            float x=weightAt(s.offsets1.w+row);
+            for(uint col=0;col<s.widths.z;++col) x+=weightAt(s.offsets1.z+row*s.widths.z+col)*h1[col];
+            raw[row]=x;
+        }
+        if(count>0 && sigmoid(raw[0])>=s.infer.y) {
+            vec3 n=vec3(raw[2],raw[3],raw[4]);
+            // The exported normal is object-local; both methods display it the same way.
+            color=dot(n,n)>1e-24?normalColor(n):background;
+        }
+    }
+    imageStore(storageImages[nonuniformEXT(pc.swapchainImage)],pixel,vec4(color,1));
+}

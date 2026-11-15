@@ -72,7 +72,7 @@ namespace rhi::vk {
                 float durationMs = (start != 0 && end != 0 && end > start) 
                                 ? static_cast<float>(end - start) * m_timestampPeriod / 1000000.0f 
                                 : 0.0f;
-
+                m_latestResults[i] = durationMs;
                 if (m_stats[i].count == 0) {
                     m_stats[i].firstFrameTime = durationMs;
                 }
